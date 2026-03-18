@@ -1,0 +1,21 @@
+# Application config with sensitive data
+src/main/resources/application.yml
+
+# Build artifacts
+target/
+*.class
+*.jar
+*.war
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Data
+data/
+*.db
+
+# Logs
+logs/
+*.log

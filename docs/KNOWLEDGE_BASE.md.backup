@@ -1,0 +1,1208 @@
+# 知识库模块设计文档
+
+## 1. 模块概述
+
+### 1.1 职责
+知识库模块负责索引Java项目的API信息，提供基于语义的检索能力，是整个测试用例生成系统的核心基础设施。
+
+### 1.2 核心功能
+- 扫描Java项目，提取API元数据
+- **导入外部API文档**（OpenAPI、Swagger、Markdown等）
+- 生成API的向量表示
+- 构建和维护向量索引
+- 提供高效的语义检索接口
+- 支持增量更新和实时同步
+- **统一检索内部代码和外部服务API**
+
+### 1.3 技术目标
+- **检索精度**：Top 5召回率 > 90%
+- **检索速度**：单次查询 < 100ms
+- **索引构建**：1000个API < 30秒
+- **内存占用**：合理控制在可接受范围
+
+## 2. 架构设计
+
+### 2.1 模块结构
+
+```
+knowledge-base/
+├── scanner/          # 项目扫描器
+│   ├── ProjectScanner.java
+│   └── JavaFileParser.java
+├── extractor/        # 元数据提取器
+│   ├── ApiMetadataExtractor.java
+│   └── DescriptionGenerator.java
+├── parser/           # 外部文档解析器（新增）
+│   ├── DocumentParser.java
+│   ├── OpenApiParser.java
+│   ├── MarkdownApiParser.java
+│   └── ExternalApiExtractor.java
+├── source/           # 文档源管理（新增）
+│   ├── DocumentSourceManager.java
+│   ├── DocumentSource.java
+│   └── DocumentRefreshScheduler.java
+├── indexer/          # 索引构建器
+│   ├── VectorIndexBuilder.java
+│   └── IndexUpdater.java
+├── retriever/        # 检索器
+│   ├── SemanticRetriever.java
+│   └── HybridRetriever.java
+└── storage/          # 存储层
+    ├── VectorStore.java
+    └── MetadataStore.java
+```
+
+### 2.2 核心接口定义
+
+```java
+/**
+ * 知识库服务接口
+ */
+public interface KnowledgeBaseService {
+
+    /**
+     * 构建项目索引（全量）
+     * @param projectPath 项目根目录
+     * @return 索引统计信息
+     */
+    IndexStats buildIndex(String projectPath);
+
+    /**
+     * 更新索引（增量）
+     * @param changedFiles 变更的文件列表
+     */
+    void updateIndex(List<String> changedFiles);
+
+    /**
+     * 语义检索API
+     * @param query 查询文本
+     * @param topK 返回结果数量
+     * @return API元数据列表
+     */
+    List<ApiMetadata> search(String query, int topK);
+
+    /**
+     * 获取索引统计信息
+     */
+    IndexStats getStats();
+}
+```
+
+## 3. 数据模型设计
+
+### 3.1 API元数据结构
+
+```java
+/**
+ * API元数据
+ */
+public class ApiMetadata {
+    // 唯一标识
+    private String apiId;              // com.example.UserService.login
+
+    // 基本信息
+    private String className;          // UserService
+    private String packageName;        // com.example
+    private String methodName;         // login
+    private String signature;          // User login(String, String)
+
+    // 详细信息
+    private List<Parameter> parameters;
+    private String returnType;
+    private List<String> exceptions;
+    private List<String> annotations;
+
+    // 文档信息
+    private String javadoc;            // Javadoc注释
+    private String description;        // 生成的描述文本
+
+    // 依赖信息
+    private List<String> dependencies; // 依赖的类
+    private List<String> fieldInjections;
+
+    // 源码信息
+    private String filePath;           // 源文件路径
+    private int lineNumber;            // 行号
+
+    // 向量信息
+    private float[] vector;            // embedding向量
+
+    // 元信息
+    private long lastModified;         // 最后修改时间
+    private String version;            // 版本号
+}
+```
+
+### 3.2 参数信息结构
+
+```java
+public class Parameter {
+    private String name;               // 参数名
+    private String type;               // 参数类型
+    private List<String> annotations;  // 注解
+    private String description;        // 参数说明
+}
+```
+
+### 3.3 索引统计信息
+
+```java
+public class IndexStats {
+    private int totalApis;             // API总数
+    private int totalClasses;          // 类总数
+    private long indexSize;            // 索引大小（字节）
+    private long buildTime;            // 构建耗时（毫秒）
+    private LocalDateTime lastUpdate;  // 最后更新时间
+}
+```
+
+## 4. 核心流程设计
+
+### 4.1 索引构建流程
+
+```
+项目路径
+  ↓
+扫描Java文件（ProjectScanner）
+  ↓
+解析AST（JavaFileParser）
+  ↓
+提取API元数据（ApiMetadataExtractor）
+  ↓
+生成描述文本（DescriptionGenerator）
+  ↓
+调用Embedding服务生成向量
+  ↓
+存储到向量数据库（VectorStore）
+  ↓
+存储元数据（MetadataStore）
+  ↓
+返回索引统计
+```
+
+### 4.2 检索流程
+
+```
+用户查询文本
+  ↓
+调用Embedding服务生成查询向量
+  ↓
+向量数据库检索（Top 50）
+  ↓
+加载候选API的元数据
+  ↓
+调用Rerank服务重排序
+  ↓
+返回Top K结果
+```
+
+### 4.3 增量更新流程
+
+```
+文件变更事件
+  ↓
+识别变更类型（新增/修改/删除）
+  ↓
+[删除] 从索引中移除旧数据
+  ↓
+[新增/修改] 重新解析和提取
+  ↓
+更新向量索引
+  ↓
+更新元数据存储
+```
+
+## 5. 关键技术实现
+
+### 5.1 项目扫描
+
+**使用JavaParser库**：
+```java
+public class ProjectScanner {
+
+    public List<CompilationUnit> scanProject(String projectPath) {
+        List<CompilationUnit> units = new ArrayList<>();
+
+        // 配置JavaParser
+        ParserConfiguration config = new ParserConfiguration();
+        config.setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17);
+
+        // 扫描src/main/java目录
+        Path sourcePath = Paths.get(projectPath, "src/main/java");
+
+        try (Stream<Path> paths = Files.walk(sourcePath)) {
+            paths.filter(p -> p.toString().endsWith(".java"))
+                 .forEach(path -> {
+                     try {
+                         CompilationUnit cu = StaticJavaParser.parse(path);
+                         units.add(cu);
+                     } catch (IOException e) {
+                         logger.warn("Failed to parse: {}", path, e);
+                     }
+                 });
+        }
+
+        return units;
+    }
+}
+```
+
+### 5.2 API元数据提取
+
+**访问者模式遍历AST**：
+```java
+public class ApiMetadataExtractor extends VoidVisitorAdapter<List<ApiMetadata>> {
+
+    @Override
+    public void visit(ClassOrInterfaceDeclaration clazz, List<ApiMetadata> collector) {
+        // 只处理public类
+        if (!clazz.isPublic()) {
+            return;
+        }
+
+        String className = clazz.getNameAsString();
+        String packageName = getPackageName(clazz);
+
+        // 遍历所有public方法
+        clazz.getMethods().stream()
+             .filter(MethodDeclaration::isPublic)
+             .forEach(method -> {
+                 ApiMetadata api = extractMethodMetadata(
+                     packageName, className, method
+                 );
+                 collector.add(api);
+             });
+
+        super.visit(clazz, collector);
+    }
+
+    private ApiMetadata extractMethodMetadata(
+        String packageName, String className, MethodDeclaration method) {
+
+        ApiMetadata api = new ApiMetadata();
+        api.setPackageName(packageName);
+        api.setClassName(className);
+        api.setMethodName(method.getNameAsString());
+        api.setSignature(method.getSignature().asString());
+        api.setReturnType(method.getType().asString());
+
+        // 提取参数
+        List<Parameter> params = method.getParameters().stream()
+            .map(this::extractParameter)
+            .collect(Collectors.toList());
+        api.setParameters(params);
+
+        // 提取异常
+        List<String> exceptions = method.getThrownExceptions().stream()
+            .map(ReferenceType::asString)
+            .collect(Collectors.toList());
+        api.setExceptions(exceptions);
+
+        // 提取Javadoc
+        method.getJavadoc().ifPresent(javadoc -> {
+            api.setJavadoc(javadoc.getDescription().toText());
+        });
+
+        return api;
+    }
+}
+```
+
+### 5.3 描述文本生成
+
+**策略**：组合多种信息生成语义丰富的描述
+
+```java
+public class DescriptionGenerator {
+
+    public String generate(ApiMetadata api) {
+        StringBuilder desc = new StringBuilder();
+
+        // 1. 类名和方法名
+        desc.append(api.getClassName())
+            .append("类的")
+            .append(api.getMethodName())
+            .append("方法");
+
+        // 2. Javadoc摘要
+        if (api.getJavadoc() != null) {
+            String summary = extractSummary(api.getJavadoc());
+            desc.append("：").append(summary);
+        }
+
+        // 3. 参数信息
+        if (!api.getParameters().isEmpty()) {
+            desc.append("。接收参数：");
+            api.getParameters().forEach(param -> {
+                desc.append(param.getName())
+                    .append("(").append(param.getType()).append(")");
+                if (param.getDescription() != null) {
+                    desc.append(param.getDescription());
+                }
+                desc.append("，");
+            });
+            desc.setLength(desc.length() - 1); // 移除最后的逗号
+        }
+
+        // 4. 返回类型
+        desc.append("。返回：")
+            .append(api.getReturnType());
+
+        // 5. 异常信息
+        if (!api.getExceptions().isEmpty()) {
+            desc.append("。可能抛出：")
+                .append(String.join("、", api.getExceptions()));
+        }
+
+        // 6. 依赖信息
+        if (!api.getDependencies().isEmpty()) {
+            desc.append("。依赖：")
+                .append(String.join("、", api.getDependencies()));
+        }
+
+        return desc.toString();
+    }
+
+    private String extractSummary(String javadoc) {
+        // 提取第一句话作为摘要
+        int dotIndex = javadoc.indexOf('。');
+        if (dotIndex == -1) {
+            dotIndex = javadoc.indexOf('.');
+        }
+        return dotIndex > 0 ? javadoc.substring(0, dotIndex) : javadoc;
+    }
+}
+```
+
+### 5.4 向量索引构建
+
+**使用FAISS**：
+```java
+public class VectorIndexBuilder {
+
+    private final EmbeddingService embeddingService;
+    private final int dimension;
+
+    public VectorIndex build(List<ApiMetadata> apis) {
+        // 1. 批量生成向量
+        List<String> descriptions = apis.stream()
+            .map(ApiMetadata::getDescription)
+            .collect(Collectors.toList());
+
+        List<float[]> vectors = embeddingService.embedBatch(descriptions);
+
+        // 2. 构建FAISS索引
+        // 使用IndexFlatIP（内积）或IndexFlatL2（欧氏距离）
+        // 这里使用内积，适合归一化的向量
+        swigfaiss.IndexFlatIP index = new swigfaiss.IndexFlatIP(dimension);
+
+        // 3. 添加向量
+        for (int i = 0; i < vectors.size(); i++) {
+            index.add(vectors.get(i));
+            apis.get(i).setVector(vectors.get(i));
+        }
+
+        return new VectorIndex(index, apis);
+    }
+}
+```
+
+### 5.5 语义检索实现
+
+```java
+public class SemanticRetriever {
+
+    private final VectorIndex index;
+    private final EmbeddingService embeddingService;
+    private final MetadataStore metadataStore;
+
+    public List<ApiMetadata> search(String query, int topK) {
+        // 1. 查询向量化
+        float[] queryVector = embeddingService.embed(query);
+
+        // 2. 向量检索
+        SearchResult result = index.search(queryVector, topK);
+
+        // 3. 加载元数据
+        List<ApiMetadata> apis = new ArrayList<>();
+        for (int i = 0; i < result.getIds().length; i++) {
+            String apiId = result.getIds()[i];
+            float score = result.getScores()[i];
+
+            ApiMetadata api = metadataStore.get(apiId);
+            api.setScore(score);
+            apis.add(api);
+        }
+
+        return apis;
+    }
+}
+```
+
+## 6. 存储设计
+
+### 6.1 向量存储
+
+**方案：FAISS + 文件持久化**
+
+```java
+public class VectorStore {
+
+    private final String indexPath;
+    private swigfaiss.Index index;
+
+    public void save() {
+        swigfaiss.write_index(index, indexPath);
+    }
+
+    public void load() {
+        index = swigfaiss.read_index(indexPath);
+    }
+}
+```
+
+### 6.2 元数据存储
+
+**方案：SQLite本地数据库**
+
+```sql
+CREATE TABLE api_metadata (
+    api_id TEXT PRIMARY KEY,
+    class_name TEXT NOT NULL,
+    package_name TEXT NOT NULL,
+    method_name TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    return_type TEXT,
+    javadoc TEXT,
+    description TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    line_number INTEGER,
+    last_modified INTEGER,
+    version TEXT,
+    -- JSON字段
+    parameters TEXT,      -- JSON数组
+    exceptions TEXT,      -- JSON数组
+    dependencies TEXT,    -- JSON数组
+    annotations TEXT      -- JSON数组
+);
+
+CREATE INDEX idx_class_name ON api_metadata(class_name);
+CREATE INDEX idx_method_name ON api_metadata(method_name);
+CREATE INDEX idx_file_path ON api_metadata(file_path);
+```
+
+## 7. 增量更新策略
+
+### 7.1 文件监听
+
+**使用WatchService**：
+```java
+public class FileWatcher {
+
+    private final WatchService watchService;
+    private final KnowledgeBaseService knowledgeBase;
+
+    public void start(String projectPath) throws IOException {
+        Path path = Paths.get(projectPath, "src/main/java");
+
+        path.register(watchService,
+            StandardWatchEventKinds.ENTRY_CREATE,
+            StandardWatchEventKinds.ENTRY_MODIFY,
+            StandardWatchEventKinds.ENTRY_DELETE
+        );
+
+        while (true) {
+            WatchKey key = watchService.take();
+
+            List<String> changedFiles = new ArrayList<>();
+            for (WatchEvent<?> event : key.pollEvents()) {
+                Path changed = (Path) event.context();
+                if (changed.toString().endsWith(".java")) {
+                    changedFiles.add(changed.toString());
+                }
+            }
+
+            if (!changedFiles.isEmpty()) {
+                knowledgeBase.updateIndex(changedFiles);
+            }
+
+            key.reset();
+        }
+    }
+}
+```
+
+### 7.2 更新策略
+
+```java
+public class IndexUpdater {
+
+    public void update(List<String> changedFiles) {
+        for (String file : changedFiles) {
+            // 1. 查找该文件的所有API
+            List<String> oldApiIds = metadataStore.findByFile(file);
+
+            // 2. 从索引中删除
+            for (String apiId : oldApiIds) {
+                vectorStore.remove(apiId);
+                metadataStore.delete(apiId);
+            }
+
+            // 3. 重新解析文件
+            List<ApiMetadata> newApis = parseFile(file);
+
+            // 4. 生成向量并添加到索引
+            for (ApiMetadata api : newApis) {
+                float[] vector = embeddingService.embed(api.getDescription());
+                api.setVector(vector);
+
+                vectorStore.add(api.getApiId(), vector);
+                metadataStore.save(api);
+            }
+        }
+    }
+}
+```
+
+## 8. 性能优化
+
+### 8.1 批量处理
+
+- Embedding调用批量化，减少网络开销
+- 数据库操作使用批量插入
+- 向量索引批量添加
+
+### 8.2 缓存策略
+
+```java
+public class CachedEmbeddingService implements EmbeddingService {
+
+    private final EmbeddingService delegate;
+    private final Cache<String, float[]> cache;
+
+    public CachedEmbeddingService(EmbeddingService delegate) {
+        this.delegate = delegate;
+        this.cache = Caffeine.newBuilder()
+            .maximumSize(10000)
+            .expireAfterWrite(1, TimeUnit.HOURS)
+            .build();
+    }
+
+    @Override
+    public float[] embed(String text) {
+        return cache.get(text, delegate::embed);
+    }
+}
+```
+
+### 8.3 异步处理
+
+```java
+public class AsyncIndexBuilder {
+
+    private final ExecutorService executor;
+
+    public CompletableFuture<IndexStats> buildIndexAsync(String projectPath) {
+        return CompletableFuture.supplyAsync(() -> {
+            return buildIndex(projectPath);
+        }, executor);
+    }
+}
+```
+
+## 9. 错误处理
+
+### 9.1 解析失败处理
+
+```java
+try {
+    CompilationUnit cu = StaticJavaParser.parse(path);
+} catch (ParseProblemException e) {
+    logger.warn("Failed to parse {}: {}", path, e.getMessage());
+    // 记录失败文件，继续处理其他文件
+    failedFiles.add(path);
+}
+```
+
+### 9.2 Embedding服务失败
+
+```java
+try {
+    float[] vector = embeddingService.embed(text);
+} catch (EmbeddingException e) {
+    logger.error("Embedding failed for: {}", text, e);
+    // 使用零向量或跳过该API
+    return new float[dimension];
+}
+```
+
+## 10. 配置项
+
+```yaml
+knowledge_base:
+  # 项目配置
+  source_path: "./src/main/java"
+  exclude_patterns:
+    - "**/test/**"
+    - "**/generated/**"
+
+  # 索引配置
+  index_path: "./data/knowledge_base"
+  dimension: 1024
+
+  # 扫描配置
+  auto_scan: true
+  scan_interval: 300  # 秒
+
+  # 性能配置
+  batch_size: 32
+  thread_pool_size: 4
+  cache_size: 10000
+
+  # 过滤配置
+  min_method_visibility: "public"
+  include_deprecated: false
+```
+
+## 11. 测试策略
+
+### 11.1 单元测试
+- 测试API元数据提取的准确性
+- 测试描述文本生成的质量
+- 测试向量索引的正确性
+
+### 11.2 集成测试
+- 测试完整的索引构建流程
+- 测试检索的准确性和速度
+- 测试增量更新的正确性
+
+### 11.3 性能测试
+- 测试大型项目的索引构建时间
+- 测试检索响应时间
+- 测试内存占用
+
+## 12. 后续优化方向
+
+- 支持Kotlin、Scala等JVM语言
+- 支持跨项目检索
+- 支持API使用示例的索引
+- 支持代码变更历史的追踪
+- 优化向量索引算法（HNSW、IVF等）
+
+## 13. 外部文档支持
+
+### 13.1 概述
+
+测试用例生成往往需要基于已有服务的API，这些服务可能有外部文档（OpenAPI、Swagger、Markdown等）。知识库需要支持导入和索引这些外部文档，与内部代码统一检索。
+
+### 13.2 支持的文档类型
+
+**优先级1（MVP）**：
+- OpenAPI 3.x（JSON/YAML格式）
+- Swagger 2.0（JSON/YAML格式）
+- Markdown格式的API文档
+
+**优先级2（未来）**：
+- 在线文档URL（通过网页抓取）
+- GraphQL schema文件
+- gRPC proto文件
+- Postman集合
+
+**文档源类型枚举**：
+```java
+public enum DocumentSourceType {
+    INTERNAL_CODE,        // Java源代码（现有）
+    OPENAPI_FILE,         // 本地OpenAPI/Swagger文件
+    MARKDOWN_FILE,        // 本地Markdown文档
+    REMOTE_URL,           // 在线文档
+    GRAPHQL_SCHEMA,       // GraphQL schema
+    GRPC_PROTO           // gRPC proto定义
+}
+```
+
+### 13.3 数据模型扩展
+
+**扩展ApiMetadata类**：
+```java
+public class ApiMetadata {
+    // 现有字段...
+    private String apiId;
+    private String className;
+    private String methodName;
+    private String signature;
+    private List<Parameter> parameters;
+    private String returnType;
+    private String description;
+    private float[] vector;
+    
+    // 新增：来源信息
+    private DocumentSourceType sourceType;     // 来源类型
+    private String sourceLocation;             // 文件路径或URL
+    private String sourceVersion;              // 文档版本
+    private ExternalApiInfo externalInfo;      // 外部API详细信息
+    
+    // 新增：外部API特有字段
+    private String httpMethod;                 // GET, POST等
+    private String endpoint;                   // /api/users/{id}
+    private Map<String, String> headers;       // 必需的请求头
+    private String requestBody;                // 请求体schema
+    private String responseBody;               // 响应体schema
+    private List<String> statusCodes;          // 可能的HTTP状态码
+}
+```
+
+**外部API信息类**：
+```java
+public class ExternalApiInfo {
+    private String serviceName;                // 外部服务名称
+    private String baseUrl;                    // 服务基础URL
+    private String authType;                   // 认证类型：none, bearer, apiKey, oauth2
+    private Map<String, String> authConfig;    // 认证配置
+    private String documentVersion;            // 文档版本
+    private LocalDateTime lastFetched;         // 最后获取时间
+}
+```
+
+**文档源配置类**：
+```java
+public class DocumentSource {
+    private String id;                         // 唯一标识
+    private String name;                       // 显示名称
+    private DocumentSourceType type;           // 来源类型
+    private String location;                   // 文件路径或URL
+    private boolean enabled;                   // 是否启用
+    private int refreshInterval;               // 自动刷新间隔（秒）
+    private LocalDateTime lastIndexed;         // 最后索引时间
+    private Map<String, String> metadata;      // 附加元数据
+}
+```
+
+### 13.4 文档解析器架构
+
+**核心接口**：
+```java
+/**
+ * 文档解析器接口 - 每种格式一个实现
+ */
+public interface DocumentParser {
+    /**
+     * 检查是否支持该文档源
+     */
+    boolean supports(DocumentSource source);
+    
+    /**
+     * 解析文档并提取原始API信息
+     */
+    List<RawApiInfo> parse(DocumentSource source) throws ParseException;
+}
+
+/**
+ * 原始API信息（解析后、转换前）
+ */
+public class RawApiInfo {
+    private String name;
+    private String description;
+    private Map<String, Object> properties;    // 格式特定的属性
+}
+
+/**
+ * 外部API提取器 - 将RawApiInfo转换为ApiMetadata
+ */
+public interface ExternalApiExtractor {
+    ApiMetadata extract(RawApiInfo rawInfo, DocumentSource source);
+}
+```
+
+**OpenAPI解析器示例**：
+```java
+public class OpenApiParser implements DocumentParser {
+    
+    @Override
+    public boolean supports(DocumentSource source) {
+        return source.getType() == DocumentSourceType.OPENAPI_FILE;
+    }
+    
+    @Override
+    public List<RawApiInfo> parse(DocumentSource source) {
+        // 使用swagger-parser库
+        OpenAPI openAPI = new OpenAPIV3Parser().read(source.getLocation());
+        
+        List<RawApiInfo> apis = new ArrayList<>();
+        
+        // 遍历所有路径和操作
+        openAPI.getPaths().forEach((path, pathItem) -> {
+            pathItem.readOperationsMap().forEach((method, operation) -> {
+                RawApiInfo api = new RawApiInfo();
+                api.setName(operation.getOperationId());
+                api.setDescription(operation.getSummary() + " " + 
+                                   operation.getDescription());
+                
+                Map<String, Object> props = new HashMap<>();
+                props.put("httpMethod", method.name());
+                props.put("endpoint", path);
+                props.put("parameters", operation.getParameters());
+                props.put("requestBody", operation.getRequestBody());
+                props.put("responses", operation.getResponses());
+                
+                api.setProperties(props);
+                apis.add(api);
+            });
+        });
+        
+        return apis;
+    }
+}
+```
+
+### 13.5 配置扩展
+
+**扩展config.yaml**：
+```yaml
+# 现有配置...
+embedding:
+  provider: "custom"
+  api_url: "https://your-embedding-api.com/v1/embeddings"
+  api_key: "${EMBEDDING_API_KEY}"
+  model_name: "bge-large-zh-v1.5"
+  dimension: 1024
+
+# 新增：外部文档源配置
+external_sources:
+  # OpenAPI示例
+  - id: "user-service-api"
+    name: "User Service API"
+    type: "openapi"
+    location: "./docs/external/user-service-openapi.yaml"
+    enabled: true
+    refresh_interval: 3600  # 1小时
+    metadata:
+      service_name: "UserService"
+      base_url: "https://api.example.com"
+      auth_type: "bearer"
+  
+  # Markdown示例
+  - id: "payment-api-docs"
+    name: "Payment API Documentation"
+    type: "markdown"
+    location: "./docs/external/payment-api.md"
+    enabled: true
+    refresh_interval: 7200
+    metadata:
+      service_name: "PaymentService"
+      base_url: "https://payment.example.com"
+  
+  # 远程URL示例
+  - id: "third-party-api"
+    name: "Third Party API"
+    type: "remote_url"
+    location: "https://api.thirdparty.com/docs/openapi.json"
+    enabled: true
+    refresh_interval: 86400  # 24小时
+    metadata:
+      service_name: "ThirdPartyService"
+      auth_type: "apiKey"
+
+knowledge_base:
+  source_path: "./src/main/java"
+  index_path: "./data/knowledge_base"
+  
+  # 新增：外部文档设置
+  external_docs:
+    enabled: true
+    auto_refresh: true
+    cache_dir: "./data/external_docs_cache"
+```
+
+### 13.6 存储扩展
+
+**扩展SQLite数据库schema**：
+```sql
+-- 扩展api_metadata表，添加外部API字段
+CREATE TABLE api_metadata (
+    api_id TEXT PRIMARY KEY,
+    class_name TEXT,
+    method_name TEXT,
+    signature TEXT,
+    description TEXT NOT NULL,
+    parameters TEXT,
+    
+    -- 新增：外部API字段
+    source_type TEXT NOT NULL DEFAULT 'INTERNAL_CODE',
+    source_location TEXT,
+    source_version TEXT,
+    http_method TEXT,
+    endpoint TEXT,
+    request_body TEXT,
+    response_body TEXT,
+    status_codes TEXT,
+    external_info TEXT  -- JSON格式
+);
+
+-- 新增：文档源表
+CREATE TABLE document_sources (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    location TEXT NOT NULL,
+    enabled INTEGER DEFAULT 1,
+    refresh_interval INTEGER,
+    last_indexed INTEGER,
+    metadata TEXT  -- JSON格式
+);
+
+-- 新增索引
+CREATE INDEX idx_source_type ON api_metadata(source_type);
+CREATE INDEX idx_source_location ON api_metadata(source_location);
+```
+
+### 13.7 检索增强
+
+**支持来源过滤的检索**：
+```java
+public class HybridRetriever {
+    
+    /**
+     * 支持来源类型过滤的检索
+     */
+    public List<ApiMetadata> search(String query, int topK, SearchOptions options) {
+        // 1. 生成查询向量
+        float[] queryVector = embeddingService.embed(query);
+        
+        // 2. 向量检索（召回更多候选）
+        List<ApiMetadata> candidates = vectorStore.search(queryVector, topK * 3);
+        
+        // 3. 按来源类型过滤
+        if (options.getSourceTypes() != null) {
+            candidates = candidates.stream()
+                .filter(api -> options.getSourceTypes().contains(api.getSourceType()))
+                .collect(Collectors.toList());
+        }
+        
+        // 4. Rerank重排序
+        List<ApiMetadata> reranked = rerankService.rerank(query, candidates);
+        
+        // 5. 返回Top K
+        return reranked.stream().limit(topK).collect(Collectors.toList());
+    }
+}
+
+public class SearchOptions {
+    private Set<DocumentSourceType> sourceTypes;  // 按来源类型过滤
+    private boolean includeInternal = true;       // 包含内部API
+    private boolean includeExternal = true;       // 包含外部API
+    private String serviceNameFilter;             // 按服务名过滤
+}
+```
+
+**结果展示（带来源标识）**：
+```java
+// 检索结果示例：
+// [内部] UserService.login()
+// [外部-AuthService] POST /api/v1/auth/login
+// [外部-UserAPI] GET /api/users/authenticate
+```
+
+### 13.8 外部API描述生成
+
+**扩展DescriptionGenerator**：
+```java
+public class DescriptionGenerator {
+    
+    public String generate(ApiMetadata api) {
+        if (api.getSourceType() == DocumentSourceType.INTERNAL_CODE) {
+            return generateInternalDescription(api);
+        } else {
+            return generateExternalDescription(api);
+        }
+    }
+    
+    private String generateExternalDescription(ApiMetadata api) {
+        StringBuilder desc = new StringBuilder();
+        
+        // 1. 服务名和端点
+        if (api.getExternalInfo() != null) {
+            desc.append(api.getExternalInfo().getServiceName()).append("服务的");
+        }
+        if (api.getHttpMethod() != null) {
+            desc.append(api.getHttpMethod()).append(" ");
+        }
+        if (api.getEndpoint() != null) {
+            desc.append(api.getEndpoint()).append("接口");
+        }
+        
+        // 2. 描述
+        if (api.getDescription() != null) {
+            desc.append("：").append(api.getDescription());
+        }
+        
+        // 3. 参数
+        if (!api.getParameters().isEmpty()) {
+            desc.append("。请求参数：");
+            api.getParameters().forEach(param -> {
+                desc.append(param.getName())
+                    .append("(").append(param.getType()).append(")，");
+            });
+            desc.setLength(desc.length() - 1);
+        }
+        
+        // 4. 请求/响应体
+        if (api.getRequestBody() != null) {
+            desc.append("。请求体：").append(api.getRequestBody());
+        }
+        if (api.getResponseBody() != null) {
+            desc.append("。响应：").append(api.getResponseBody());
+        }
+        
+        return desc.toString();
+    }
+}
+```
+
+### 13.9 自动更新策略
+
+**文档刷新调度器**：
+```java
+public class DocumentRefreshScheduler {
+    
+    private final ScheduledExecutorService scheduler;
+    private final DocumentSourceManager sourceManager;
+    
+    public void start() {
+        // 每5分钟检查一次更新
+        scheduler.scheduleAtFixedRate(() -> {
+            List<DocumentSource> sources = loadAllSources();
+            
+            for (DocumentSource source : sources) {
+                if (source.isEnabled() && shouldRefresh(source)) {
+                    try {
+                        sourceManager.updateSource(source.getId());
+                        logger.info("Refreshed: {}", source.getName());
+                    } catch (Exception e) {
+                        logger.error("Failed to refresh: {}", source.getName(), e);
+                    }
+                }
+            }
+        }, 0, 5, TimeUnit.MINUTES);
+    }
+    
+    private boolean shouldRefresh(DocumentSource source) {
+        if (source.getLastIndexed() == null) return true;
+        
+        long elapsed = Duration.between(
+            source.getLastIndexed(), 
+            LocalDateTime.now()
+        ).getSeconds();
+        
+        return elapsed >= source.getRefreshInterval();
+    }
+}
+```
+
+### 13.10 完整实现流程
+
+**初始索引构建**：
+```
+1. 加载配置（config.yaml）
+   ↓
+2. 初始化DocumentSourceManager
+   ↓
+3. 注册解析器（OpenApiParser、MarkdownParser等）
+   ↓
+4. 对每个启用的文档源：
+   a. 选择合适的解析器
+   b. 解析文档 → RawApiInfo列表
+   c. 转换为ApiMetadata
+   d. 生成描述文本
+   e. 生成embedding向量
+   ↓
+5. 与内部API合并
+   ↓
+6. 构建统一向量索引
+   ↓
+7. 存储元数据到数据库
+   ↓
+8. 启动自动刷新调度器
+```
+
+**查询流程示例**：
+```
+用户查询："测试用户登录API"
+   ↓
+生成查询向量
+   ↓
+向量检索（Top 50）
+   ↓
+结果包含：
+   - [内部] UserService.login()
+   - [外部-AuthService] POST /api/v1/auth/login
+   - [外部-UserAPI] GET /api/users/authenticate
+   ↓
+Rerank重排序（Top 5）
+   ↓
+展示带来源标识的结果
+   ↓
+用户选择API
+   ↓
+生成测试代码（内部用直接调用，外部用RestTemplate/HttpClient）
+```
+
+### 13.11 网页数据源支持（最重要的数据来源）
+
+#### 13.11.1 概述
+
+网页是API文档的主要来源，很多服务的API文档都是在线网页形式。需要完整的抓取、解析、索引pipeline。
+
+#### 13.11.2 模块架构
+
+```
+web-crawler/
+├── fetcher/           # 网页抓取
+│   ├── WebFetcher.java
+│   ├── HttpClientPool.java
+│   └── RateLimiter.java
+├── parser/            # 网页解析
+│   ├── HtmlParser.java
+│   ├── ContentExtractor.java
+│   └── StructureDetector.java
+├── cleaner/           # 内容清洗
+│   ├── ContentCleaner.java
+│   └── NoiseRemover.java
+├── indexer/           # 网页索引
+│   ├── WebPageIndexer.java
+│   └── LinkGraphBuilder.java
+└── cache/             # 缓存管理
+    ├── PageCache.java
+    └── ChangeDetector.java
+```
+
+#### 13.11.3 网页抓取接口
+
+```java
+public interface WebFetcher {
+    /**
+     * 抓取单个网页
+     */
+    FetchResult fetch(String url, FetchOptions options);
+    
+    /**
+     * 批量抓取（支持深度遍历）
+     */
+    List<FetchResult> fetchBatch(List<String> urls, int maxDepth);
+}
+
+public class FetchResult {
+    private String url;
+    private int statusCode;
+    private String html;              // 原始HTML
+    private String renderedHtml;      // JS渲染后的HTML
+    private long fetchTime;
+    private List<String> outLinks;    // 出链
+}
+
+public class FetchOptions {
+    private boolean executeJavaScript;  // 是否执行JS
+    private int timeout;                // 超时时间（秒）
+    private String userAgent;
+    private int maxRetries;
+}
+```
