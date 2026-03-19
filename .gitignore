@@ -1,5 +1,5 @@
 # Application config with sensitive data
-src/main/resources/config.yaml
+src/main/resources/application.yml
 
 # Build artifacts
 target/
