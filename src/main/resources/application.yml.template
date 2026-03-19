@@ -10,7 +10,7 @@ knowledge-base:
     provider: custom  # custom/openai/local
     api-url: ${EMBEDDING_API_URL:http://localhost:8080/v1/embeddings}
     api-key: ${EMBEDDING_API_KEY:}
-    model: bge-large-zh-v1.5
+    model: ${EMBEDDING_MODEL:bge-large-zh-v1.5}
     dimension: 1024
 
   # 重排序模型配置
@@ -18,6 +18,7 @@ knowledge-base:
     provider: custom
     api-url: ${RERANK_API_URL:http://localhost:8080/v1/rerank}
     api-key: ${RERANK_API_KEY:}
+    model: ${RERANK_MODEL:bge-reranker-large}
     top-k: 5
 
   # 文档源配置
