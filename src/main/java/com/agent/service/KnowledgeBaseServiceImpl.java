@@ -10,6 +10,7 @@ import com.agent.processor.DocumentProcessor;
 import com.agent.storage.MetadataStore;
 import com.agent.storage.VectorStoreAdapter;
 import dev.langchain4j.data.document.Document;
+import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -79,10 +80,11 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
                         String content = metadata.getDescription() + " " +
                                         metadata.getClassName() + "." + metadata.getMethodName();
-                        Document doc = Document.from(content,
-                                Document.Metadata.from("source", file.toString())
-                                        .put("apiId", metadata.getApiId())
-                                        .put("type", DocumentSourceType.INTERNAL_CODE.name()));
+                        Metadata metadataObj = new Metadata();
+                        metadataObj.put("source", file.toString());
+                        metadataObj.put("apiId", metadata.getApiId());
+                        metadataObj.put("type", DocumentSourceType.INTERNAL_CODE.name());
+                        Document doc = Document.from(content, metadataObj);
                         documents.add(doc);
                     }
                     successCount++;
@@ -124,10 +126,11 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
                     documentProcessor.processAndStore(doc);
                     successCount++;
                 } else if (source.getType() == DocumentSourceType.MARKDOWN_FILE) {
-                    String content = Files.readString(Paths.get(source.getLocation()));
-                    Document doc = Document.from(content,
-                            Document.Metadata.from("source", source.getLocation())
-                                    .put("type", source.getType().name()));
+                    String content = new String(Files.readAllBytes(Paths.get(source.getLocation())));
+                    Metadata metadataObj = new Metadata();
+                    metadataObj.put("source", source.getLocation());
+                    metadataObj.put("type", source.getType().name());
+                    Document doc = Document.from(content, metadataObj);
                     documentProcessor.processAndStore(doc);
                     successCount++;
                 }
@@ -180,9 +183,10 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         logger.info("Updating index for {} changed files", changedFiles.size());
         for (String filePath : changedFiles) {
             try {
-                String content = Files.readString(Paths.get(filePath));
-                Document doc = Document.from(content,
-                        Document.Metadata.from("source", filePath));
+                String content = new String(Files.readAllBytes(Paths.get(filePath)));
+                Metadata metadataObj = new Metadata();
+                metadataObj.put("source", filePath);
+                Document doc = Document.from(content, metadataObj);
                 documentProcessor.processAndStore(doc);
             } catch (IOException e) {
                 logger.error("Failed to update index for: {}", filePath, e);

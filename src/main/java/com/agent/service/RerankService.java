@@ -14,17 +14,20 @@ public interface RerankService {
      * @return 排序后的索引和分数
      */
     List<RerankResult> rerank(String query, List<String> candidates);
-}
 
-class RerankResult {
-    private int index;
-    private double score;
+    /**
+     * Rerank结果
+     */
+    class RerankResult {
+        private int index;
+        private double score;
 
-    public RerankResult(int index, double score) {
-        this.index = index;
-        this.score = score;
+        public RerankResult(int index, double score) {
+            this.index = index;
+            this.score = score;
+        }
+
+        public int getIndex() { return index; }
+        public double getScore() { return score; }
     }
-
-    public int getIndex() { return index; }
-    public double getScore() { return score; }
 }

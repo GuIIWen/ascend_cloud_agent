@@ -49,6 +49,7 @@ public class KnowledgeBaseConfig {
         private String provider = "custom";
         private String apiUrl;
         private String apiKey;
+        private String model = "bge-reranker-large";
         private int topK = 5;
 
         public String getProvider() { return provider; }
@@ -57,6 +58,8 @@ public class KnowledgeBaseConfig {
         public void setApiUrl(String apiUrl) { this.apiUrl = apiUrl; }
         public String getApiKey() { return apiKey; }
         public void setApiKey(String apiKey) { this.apiKey = apiKey; }
+        public String getModel() { return model; }
+        public void setModel(String model) { this.model = model; }
         public int getTopK() { return topK; }
         public void setTopK(int topK) { this.topK = topK; }
     }

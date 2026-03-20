@@ -60,7 +60,8 @@ public class JavaCodeParser {
             parameters.add(new Parameter(
                     param.getNameAsString(),
                     param.getType().asString(),
-                    param.getJavadoc().map(j -> j.getDescription().toText()).orElse("")
+                    "",  // Parameter-level Javadoc not directly accessible in JavaParser
+                    false  // default to not required
             ));
         });
 

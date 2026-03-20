@@ -5,6 +5,7 @@ import com.agent.config.ModelConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.*;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -28,10 +29,9 @@ public class CustomEmbeddingService implements EmbeddingService {
     @Override
     public float[] embed(String text) {
         try {
-            Map<String, Object> requestBody = Map.of(
-                "model", config.getModelName(),
-                "input", text
-            );
+            Map<String, Object> requestBody = new HashMap<>();
+            requestBody.put("model", config.getModelName());
+            requestBody.put("input", text);
 
             Request request = new Request.Builder()
                 .url(config.getApiUrl())
@@ -45,9 +45,11 @@ public class CustomEmbeddingService implements EmbeddingService {
             try (Response response = client.newCall(request).execute()) {
                 Map<String, Object> result = mapper.readValue(response.body().string(), Map.class);
                 List<Double> embedding = (List<Double>) ((Map) ((List) result.get("data")).get(0)).get("embedding");
-                return embedding.stream().map(Double::floatValue).collect(Collectors.toList())
-                    .stream().mapToDouble(Float::doubleValue).collect(Collectors.toList())
-                    .stream().map(Double::floatValue).toArray(float[]::new);
+                float[] resultArray = new float[embedding.size()];
+                for (int i = 0; i < embedding.size(); i++) {
+                    resultArray[i] = embedding.get(i).floatValue();
+                }
+                return resultArray;
             }
         } catch (Exception e) {
             throw new RuntimeException("Embedding failed", e);

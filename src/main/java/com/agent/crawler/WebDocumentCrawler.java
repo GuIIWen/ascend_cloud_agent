@@ -1,6 +1,7 @@
 package com.agent.crawler;
 
 import dev.langchain4j.data.document.Document;
+import dev.langchain4j.data.document.Metadata;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Element;
 
@@ -23,7 +24,10 @@ public class WebDocumentCrawler {
         String title = doc.title();
         String mainContent = extractMainContent(doc);
 
-        return Document.from(mainContent, Document.Metadata.from("source", url).put("title", title));
+        Metadata metadata = new Metadata();
+        metadata.put("source", url);
+        metadata.put("title", title);
+        return Document.from(mainContent, metadata);
     }
 
     /**
