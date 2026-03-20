@@ -70,6 +70,31 @@ class HttpModelServiceTest {
         assertTrue(observedBody.toString().contains("\"content\":\"write test\""));
     }
 
+    @Test
+    void rerankServiceCallsConfiguredEndpoint() {
+        StringBuilder observedBody = new StringBuilder();
+        OkHttpClient client = clientResponding(
+                "{\"results\":[{\"index\":1,\"relevance_score\":0.93},{\"index\":0,\"relevance_score\":0.71}]}",
+                observedBody);
+
+        KnowledgeBaseConfig.RerankConfig config = new KnowledgeBaseConfig.RerankConfig();
+        config.setProvider("custom");
+        config.setApiUrl("http://rerank.test/v1/rerank");
+        config.setModel("bge-rerank-test");
+        config.setTopK(2);
+
+        HttpRerankService service = new HttpRerankService(config, client, new ObjectMapper());
+
+        var results = service.rerank("query", List.of("doc-a", "doc-b"));
+
+        assertEquals(2, results.size());
+        assertEquals(1, results.get(0).getIndex());
+        assertEquals(0.93d, results.get(0).getScore());
+        assertTrue(observedBody.toString().contains("\"query\":\"query\""));
+        assertTrue(observedBody.toString().contains("\"documents\":[\"doc-a\",\"doc-b\"]"));
+        assertTrue(observedBody.toString().contains("\"top_n\":2"));
+    }
+
     private static OkHttpClient clientResponding(String responseBody, StringBuilder observedBody) {
         return new OkHttpClient.Builder()
                 .addInterceptor(chain -> {

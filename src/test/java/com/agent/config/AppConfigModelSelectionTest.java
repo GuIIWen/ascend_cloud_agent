@@ -1,9 +1,12 @@
 package com.agent.config;
 
 import com.agent.service.LLMService;
+import com.agent.service.RerankService;
 import com.agent.service.impl.DisabledLLMService;
+import com.agent.service.impl.DisabledRerankService;
 import com.agent.service.impl.HttpChatCompletionsLLMService;
 import com.agent.service.impl.HttpEmbeddingModel;
+import com.agent.service.impl.HttpRerankService;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.embedding.onnx.allminilml6v2.AllMiniLmL6V2EmbeddingModel;
 import org.junit.jupiter.api.Test;
@@ -54,5 +57,25 @@ class AppConfigModelSelectionTest {
         LLMService llmService = appConfig.llmService(config);
 
         assertInstanceOf(HttpChatCompletionsLLMService.class, llmService);
+    }
+
+    @Test
+    void usesDisabledRerankByDefault() {
+        KnowledgeBaseConfig config = new KnowledgeBaseConfig();
+
+        RerankService rerankService = appConfig.rerankService(config);
+
+        assertInstanceOf(DisabledRerankService.class, rerankService);
+    }
+
+    @Test
+    void usesHttpRerankForCustomProvider() {
+        KnowledgeBaseConfig config = new KnowledgeBaseConfig();
+        config.getRerank().setProvider("custom");
+        config.getRerank().setApiUrl("http://127.0.0.1:9000/v1/rerank");
+
+        RerankService rerankService = appConfig.rerankService(config);
+
+        assertInstanceOf(HttpRerankService.class, rerankService);
     }
 }

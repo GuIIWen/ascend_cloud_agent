@@ -7,9 +7,12 @@ import com.agent.service.HuaweiCloudApiCrawlerService;
 import com.agent.service.KnowledgeBaseService;
 import com.agent.service.KnowledgeBaseServiceImpl;
 import com.agent.service.LLMService;
+import com.agent.service.RerankService;
 import com.agent.service.impl.DisabledLLMService;
+import com.agent.service.impl.DisabledRerankService;
 import com.agent.service.impl.HttpChatCompletionsLLMService;
 import com.agent.service.impl.HttpEmbeddingModel;
+import com.agent.service.impl.HttpRerankService;
 import com.agent.storage.MetadataStore;
 import com.agent.storage.VectorStoreAdapter;
 import dev.langchain4j.data.segment.TextSegment;
@@ -84,6 +87,19 @@ public class AppConfig {
             return new HttpChatCompletionsLLMService(config.getLlm());
         }
         throw new IllegalStateException("Unsupported knowledge-base.llm.provider: " + provider);
+    }
+
+    @Bean
+    @Lazy
+    public RerankService rerankService(KnowledgeBaseConfig config) {
+        String provider = config.getRerank() != null ? config.getRerank().getProvider() : null;
+        if (provider == null || provider.trim().isEmpty() || "none".equalsIgnoreCase(provider)) {
+            return new DisabledRerankService();
+        }
+        if ("custom".equalsIgnoreCase(provider)) {
+            return new HttpRerankService(config.getRerank());
+        }
+        throw new IllegalStateException("Unsupported knowledge-base.rerank.provider: " + provider);
     }
 
     @Bean
