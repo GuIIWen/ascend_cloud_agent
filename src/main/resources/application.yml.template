@@ -1,3 +1,24 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: ${SPRING_APPLICATION_NAME:ascend-agent}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: ${MANAGEMENT_ENDPOINTS_EXPOSURE_INCLUDE:health,info}
+  endpoint:
+    health:
+      show-details: ${MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS:always}
+
+logging:
+  level:
+    com.agent: ${LOGGING_LEVEL_COM_AGENT:INFO}
+    dev.langchain4j: ${LOGGING_LEVEL_LANGCHAIN4J:DEBUG}
+
 knowledge-base:
   # 向量存储配置
   vector-store:
