@@ -18,6 +18,7 @@
 | 应用配置模板 | `src/main/resources/application.yml.template` | 基线模板，不会自动生效 |
 | 应用运行入口 | `target/ascend-agent-1.0.0.jar` | 运行时建议显式设置 `JAVA_HOME`/`PATH` |
 | 长期默认运行根（目录合同） | `./.ascend_agent/` | 以 `ASCEND_AGENT_HOME` 为根管理本地持久化目录 |
+| Agent 当前阶段 | `alignment` | 通过 `/actuator/info` 暴露运行态事实 |
 
 ### 0.2 配置优先级与生效入口
 
@@ -73,6 +74,14 @@
 server:
   port: ${SERVER_PORT:8080}
 
+agent:
+  enabled: ${AGENT_ENABLED:false}
+  stage: ${AGENT_STAGE:alignment}
+  mode: ${AGENT_MODE:knowledge-base-only}
+  entrypoint: ${AGENT_ENTRYPOINT:knowledge-base-controller}
+  zero-interaction-enabled: ${AGENT_ZERO_INTERACTION_ENABLED:false}
+  orchestration-enabled: ${AGENT_ORCHESTRATION_ENABLED:false}
+
 knowledge-base:
   vector-store:
     type: chroma
@@ -105,7 +114,22 @@ knowledge-base:
     timeout-seconds: ${LLM_TIMEOUT_SECONDS:30}
 ```
 
-### 1.2 模型配置说明
+### 1.2 Agent 对齐配置
+
+| 配置项 | 说明 | 当前默认值 |
+|--------|------|------------|
+| `agent.enabled` | 是否启用主 Agent 主链路 | `false` |
+| `agent.stage` | 当前阶段标识 | `alignment` |
+| `agent.mode` | 当前运行模式 | `knowledge-base-only` |
+| `agent.entrypoint` | 当前对外入口语义 | `knowledge-base-controller` |
+| `agent.zero-interaction-enabled` | 是否开放零交互主流程 | `false` |
+| `agent.orchestration-enabled` | 是否开放调度/编排层 | `false` |
+
+当前口径：
+- `agent.*` 只用于暴露当前阶段和运行态事实，不代表主 Agent 已实现。
+- 对外运行态以 `/actuator/info` 为准，不再只靠文档描述当前阶段。
+
+### 1.3 模型配置说明
 
 | 配置项 | 说明 | 当前默认值 |
 |--------|------|------------|
@@ -245,5 +269,6 @@ java \
 | Chroma 连不上 | 请求仍指向历史旧端口 | 检查是否还有旧配置覆盖 `knowledge-base.vector-store.url` |
 | 本地文件散落在 `/tmp` | 启动后日志/数据目录不在仓库下 | 显式设置 `ASCEND_AGENT_HOME`，并同步导出 `CHROMA_*` 覆盖变量 |
 | 配置不生效 | 修改了模板但运行结果未变 | 确认修改的是运行时 `application.yml`，不是仅修改模板 |
+| 误以为主 Agent 已上线 | 文档提到 Agent，但代码里没有主链路 | 以 `/actuator/info` 中的 `agent.*` 字段为准，当前应为 `alignment / false / knowledge-base-only` |
 | Java 启动失败 | `java -version` 不符合预期 | 显式设置 `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64` |
 | 模型调用异常 | 401/超时/空响应 | 优先检查对应 `*_API_URL` / `*_API_KEY` 环境变量 |

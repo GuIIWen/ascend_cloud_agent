@@ -8,6 +8,7 @@
 - Java baseline: `21`
 - Chroma: `0.5.20`
 - Local Chroma port: `22333`
+- Agent runtime stage: `alignment` via `/actuator/info`
 - Default runtime root: `./.ascend_agent/`
 - Default directory layout:
   - `./.ascend_agent/tools/chroma-venv-0520`
@@ -108,6 +109,14 @@ curl -i http://127.0.0.1:8080/actuator/health
 ```
 
 Expected: `HTTP/1.1 200` with `{"status":"UP",...}`.
+
+Runtime status check:
+
+```bash
+curl -i http://127.0.0.1:8080/actuator/info
+```
+
+Expected: the response includes `agent.stage=alignment`, `agent.enabled=false`, and `agent.mode=knowledge-base-only`.
 
 ## Directory Contract
 

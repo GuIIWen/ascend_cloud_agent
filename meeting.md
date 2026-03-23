@@ -6,6 +6,72 @@
 - 建议把最新记录放在文件最上方，便于事后快速查看。
 - 记录至少包含：时间、主题、范围、统一结论、问题分级、行动项、关键证据。
 
+## 2026-03-23 17:33:00 +0800
+
+### 主题
+Sprint-1 第四批交付验收：Agent 对齐第一批落地（配置入口与运行态状态口径）
+
+### 参与角色
+- P10 主线程：定义“只对齐不收编”的第一批落地范围并验收
+- P9-Architecture：评估 Agent 先做范围与停止线
+
+### 评审范围
+- `src/main/java/com/agent/config/AgentConfig.java`
+- `src/main/java/com/agent/config/AppConfig.java`
+- `src/main/resources/application.yml.template`
+- `scripts/start_service.sh`
+- `README.md`
+- `docs/CONFIG_GUIDE.md`
+- `docs/ARCHITECTURE.md`
+- `docs/DESIGN.md`
+- `meeting.md`
+
+### 统一结论
+- Agent 对齐第一批已达到放行条件。
+- 当前主 Agent 仍未实现，但“当前阶段是什么”不再只靠文档描述，而是由配置合同 `agent.*` 和 `/actuator/info` 共同暴露。
+- 当前统一运行态事实为：`agent.stage=alignment`、`agent.enabled=false`、`agent.mode=knowledge-base-only`、`agent.entrypoint=knowledge-base-controller`。
+- 本轮交付只做配置入口与状态口径收口，不引入新的主链路、调度层或编排层。
+
+### 验收结果
+- `bash -n scripts/start_service.sh`
+  - 结果：通过
+- `timeout 180 mvn -q -DskipTests compile`
+  - 结果：通过
+- `timeout 180 mvn -q -Dtest=AgentConfigBindingTest,AgentInfoContributorTest,AppConfigRuntimePathTest,KnowledgeBaseConfigBindingTest,AppConfigModelSelectionTest,AppConfigVectorStoreSelectionTest,HttpModelServiceTest,HuaweiCloudApiCrawlerServiceTest test`
+  - 结果：通过
+- `timeout 180 mvn -q -DskipTests package`
+  - 结果：通过
+- 标准端口运行验证
+  - `env ASCEND_AGENT_HOME=/root/ascend_agent/.ascend_agent JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 bash scripts/start_service.sh`
+  - 结果：通过，常驻进程 PID `2371693`
+  - `curl -sS -i -m 10 http://127.0.0.1:8080/actuator/health`
+  - 结果：`HTTP/1.1 200`，返回 `{"status":"UP",...}`
+  - `curl -sS -i -m 10 http://127.0.0.1:8080/actuator/info`
+  - 结果：返回 `agent.enabled=false`、`agent.stage=alignment`、`agent.mode=knowledge-base-only`
+
+### 核心问题
+
+#### P1
+- 当前 Agent 运行态口径已经可观测，但这仍不代表零交互主 Agent 已上线；若后续文档和对外说明不继续引用 `/actuator/info`，仍可能回到“目标设计冒充当前实现”。
+
+#### P2
+- 在手工 kill 旧进程的退出路径上，日志曾出现 `NoClassDefFoundError: ch/qos/logback/classic/spi/ThrowableProxy`；当前不阻塞启动与健康检查，但说明关闭路径的日志栈还有残余风险，需要后续单独治理。
+
+### 决策
+- Agent 下一阶段继续坚持“先对齐，后收编”，不因为已有 `agent.*` 配置就提前接入主链路。
+- `/actuator/info` 从本条纪要开始成为 Agent 当前阶段的正式运行态事实来源之一。
+
+### 行动项
+- P10：提交并推送本轮 Agent 对齐第一批改动。
+- 后续执行层：单独评估关闭路径日志异常，不与 Agent 主链路建设混在同一批次。
+
+### 关键证据
+- `src/main/java/com/agent/config/AgentConfig.java`
+- `src/main/java/com/agent/config/AppConfig.java`
+- `src/test/java/com/agent/config/AgentConfigBindingTest.java`
+- `src/test/java/com/agent/config/AgentInfoContributorTest.java`
+- `.ascend_agent/logs/service.log`
+
 ## 2026-03-23 16:55:00 +0800
 
 ### 主题

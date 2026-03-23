@@ -31,6 +31,7 @@
 - 本仓库当前主要是“知识库原型 + v2 骨架”，尚未形成架构图中的端到端零交互闭环。
 - 当前 Java 基线已统一为 21；应用默认 `8080`，Chroma 开发态默认 `127.0.0.1:22333`。
 - 长期默认目录合同已收口为 `ASCEND_AGENT_HOME=./.ascend_agent/`；`tools/chroma-venv-0520`、`chroma`、`db`、`logs`、`pids` 都应从该根目录派生，不再把 `/tmp` 视为长期默认路径。
+- 当前 Agent 运行态口径以 `/actuator/info` 为准：`agent.stage=alignment`、`agent.enabled=false`、`agent.mode=knowledge-base-only`。
 - “服务能启动”只说明运行壳存在，不等价于图中所有模块都已实现。
 
 后续治理约定：

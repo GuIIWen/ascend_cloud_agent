@@ -19,6 +19,14 @@ logging:
     com.agent: ${LOGGING_LEVEL_COM_AGENT:INFO}
     dev.langchain4j: ${LOGGING_LEVEL_LANGCHAIN4J:DEBUG}
 
+agent:
+  enabled: ${AGENT_ENABLED:false}
+  stage: ${AGENT_STAGE:alignment}
+  mode: ${AGENT_MODE:knowledge-base-only}
+  entrypoint: ${AGENT_ENTRYPOINT:knowledge-base-controller}
+  zero-interaction-enabled: ${AGENT_ZERO_INTERACTION_ENABLED:false}
+  orchestration-enabled: ${AGENT_ORCHESTRATION_ENABLED:false}
+
 knowledge-base:
   # 向量存储配置
   vector-store:

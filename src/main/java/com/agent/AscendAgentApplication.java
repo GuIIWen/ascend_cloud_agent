@@ -4,7 +4,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 /**
- * Ascend Agent Application - Java测试用例生成系统
+ * Ascend Agent Application - knowledge base service and agent alignment runtime
  */
 @SpringBootApplication
 public class AscendAgentApplication {
