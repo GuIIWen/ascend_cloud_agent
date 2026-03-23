@@ -18,7 +18,7 @@ public class KnowledgeBaseConfig {
 
     public static class VectorStoreConfig {
         private String type = "chroma";
-        private String url = "http://localhost:8000";
+        private String url = "http://localhost:22333";
         private String collection = "api-knowledge-base";
 
         public String getType() { return type; }

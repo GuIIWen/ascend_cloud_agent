@@ -23,7 +23,7 @@ knowledge-base:
   # 向量存储配置
   vector-store:
     type: chroma  # chroma 或 milvus
-    url: http://localhost:8000
+    url: http://localhost:22333
     collection: api-knowledge-base
 
   # 嵌入模型配置

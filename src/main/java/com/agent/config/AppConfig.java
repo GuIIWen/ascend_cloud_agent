@@ -19,12 +19,14 @@ import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.embedding.onnx.allminilml6v2.AllMiniLmL6V2EmbeddingModel;
 import dev.langchain4j.store.embedding.EmbeddingStore;
+import dev.langchain4j.store.embedding.chroma.ChromaEmbeddingStore;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -52,10 +54,36 @@ public class AppConfig {
     }
 
     @Bean
-    public EmbeddingStore<TextSegment> embeddingStore() {
-        // 使用内存EmbeddingStore（演示用）
-        // 生产环境应使用Chroma或Milvus
-        return new dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore<>();
+    public EmbeddingStore<TextSegment> embeddingStore(KnowledgeBaseConfig config) {
+        KnowledgeBaseConfig.VectorStoreConfig vectorStore =
+                config.getVectorStore() != null ? config.getVectorStore() : new KnowledgeBaseConfig.VectorStoreConfig();
+        String type = vectorStore.getType() != null ? vectorStore.getType().trim() : "";
+
+        if (type.isEmpty() || "chroma".equalsIgnoreCase(type)) {
+            return createChromaEmbeddingStore(vectorStore);
+        }
+        if ("milvus".equalsIgnoreCase(type)) {
+            throw new IllegalStateException("knowledge-base.vector-store.type=milvus is not implemented yet");
+        }
+        throw new IllegalStateException("Unsupported knowledge-base.vector-store.type: " + type);
+    }
+
+    EmbeddingStore<TextSegment> createChromaEmbeddingStore(KnowledgeBaseConfig.VectorStoreConfig vectorStore) {
+        String baseUrl = requireValue(vectorStore.getUrl(), "knowledge-base.vector-store.url");
+        String collection = requireValue(vectorStore.getCollection(), "knowledge-base.vector-store.collection");
+
+        return ChromaEmbeddingStore.builder()
+                .baseUrl(baseUrl)
+                .collectionName(collection)
+                .timeout(Duration.ofSeconds(5))
+                .build();
+    }
+
+    private String requireValue(String value, String name) {
+        if (value == null || value.trim().isEmpty()) {
+            throw new IllegalStateException(name + " must not be blank");
+        }
+        return value.trim();
     }
 
     @Bean

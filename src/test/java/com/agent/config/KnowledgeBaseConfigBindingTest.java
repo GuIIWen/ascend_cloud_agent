@@ -15,6 +15,9 @@ class KnowledgeBaseConfigBindingTest {
     @Test
     void bindsEmbeddingAndLlmProperties() {
         Map<String, String> values = new LinkedHashMap<>();
+        values.put("knowledge-base.vector-store.type", "chroma");
+        values.put("knowledge-base.vector-store.url", "http://127.0.0.1:22333");
+        values.put("knowledge-base.vector-store.collection", "kb-test");
         values.put("knowledge-base.embedding.provider", "custom");
         values.put("knowledge-base.embedding.api-url", "http://127.0.0.1:9000/v1/embeddings");
         values.put("knowledge-base.embedding.model", "bge-m3");
@@ -31,6 +34,9 @@ class KnowledgeBaseConfigBindingTest {
         KnowledgeBaseConfig config = binder.bind("knowledge-base", Bindable.of(KnowledgeBaseConfig.class))
                 .orElseThrow(() -> new IllegalStateException("knowledge-base binding failed"));
 
+        assertEquals("chroma", config.getVectorStore().getType());
+        assertEquals("http://127.0.0.1:22333", config.getVectorStore().getUrl());
+        assertEquals("kb-test", config.getVectorStore().getCollection());
         assertEquals("custom", config.getEmbedding().getProvider());
         assertEquals("http://127.0.0.1:9000/v1/embeddings", config.getEmbedding().getApiUrl());
         assertEquals("bge-m3", config.getEmbedding().getModel());
