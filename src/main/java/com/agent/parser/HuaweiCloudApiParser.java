@@ -9,8 +9,11 @@ import org.jsoup.select.Elements;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.URI;
+import java.util.LinkedHashSet;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -25,7 +28,9 @@ public class HuaweiCloudApiParser {
     // API信息模式
     private static final Pattern API_NAME_PATTERN = Pattern.compile("(Create|Delete|Update|Query|List|Attach|Detach|Start|Stop|Restart|Modify|Describe|Get)[A-Za-z0-9_]+");
     private static final Pattern HTTP_METHOD_PATTERN = Pattern.compile("(GET|POST|PUT|DELETE|PATCH)", Pattern.CASE_INSENSITIVE);
-    private static final Pattern ENDPOINT_PATTERN = Pattern.compile("/[a-z0-9/\\-\\{\\}]+", Pattern.CASE_INSENSITIVE);
+    private static final Pattern ENDPOINT_PATTERN = Pattern.compile("/[a-z0-9_/\\.\\-\\{\\}]+", Pattern.CASE_INSENSITIVE);
+    private static final Pattern DETAIL_PAGE_PATTERN = Pattern.compile(".*/api-modelarts/[A-Za-z][A-Za-z0-9]+\\.html$");
+    private static final Pattern DIRECTORY_PAGE_PATTERN = Pattern.compile(".*/api-modelarts/modelarts_\\d+_\\d+\\.html$");
 
     /**
      * 解析华为云API文档页面
@@ -58,6 +63,42 @@ public class HuaweiCloudApiParser {
         }
 
         return apis;
+    }
+
+    /**
+     * 从目录页中发现API详情页链接，仅支持一层下钻。
+     */
+    public List<String> discoverDetailPageUrls(String htmlContent, String sourceUrl) {
+        Set<String> urls = new LinkedHashSet<>();
+        Document doc = Jsoup.parse(htmlContent, sourceUrl);
+        Elements links = doc.select("a[href]");
+
+        for (Element link : links) {
+            String href = link.absUrl("href");
+            if (href == null || href.isBlank()) {
+                continue;
+            }
+            if (!isSupportedDetailPageUrl(href)) {
+                continue;
+            }
+            if (href.equals(sourceUrl)) {
+                continue;
+            }
+            urls.add(href);
+        }
+
+        return new ArrayList<>(urls);
+    }
+
+    public boolean isDirectoryPage(String sourceUrl) {
+        return sourceUrl != null && DIRECTORY_PAGE_PATTERN.matcher(sourceUrl).matches();
+    }
+
+    public boolean isSupportedDetailPageUrl(String url) {
+        if (url == null || !DETAIL_PAGE_PATTERN.matcher(url).matches()) {
+            return false;
+        }
+        return !DIRECTORY_PAGE_PATTERN.matcher(url).matches();
     }
 
     /**
@@ -231,11 +272,12 @@ public class HuaweiCloudApiParser {
      */
     public ApiMetadata parseApiDetail(String htmlContent, String sourceUrl, String apiName) {
         Document doc = Jsoup.parse(htmlContent);
+        String resolvedApiName = resolveApiName(doc, apiName, sourceUrl);
 
         ApiMetadata.Builder builder = ApiMetadata.builder()
-                .apiId(generateApiId(apiName, sourceUrl))
-                .methodName(apiName)
-                .className(extractClassName(apiName))
+                .apiId(generateApiId(resolvedApiName, sourceUrl))
+                .methodName(resolvedApiName)
+                .className(extractClassName(resolvedApiName))
                 .sourceType(DocumentSourceType.WEB_PAGE)
                 .sourceLocation(sourceUrl);
 
@@ -247,6 +289,8 @@ public class HuaweiCloudApiParser {
             Element firstP = doc.selectFirst("article p");
             if (firstP != null) {
                 builder.description(firstP.text());
+            } else {
+                builder.description(extractApiDescription(doc));
             }
         }
 
@@ -263,11 +307,9 @@ public class HuaweiCloudApiParser {
             builder.responseBody(responseSection.text());
         }
 
-        // 检测HTTP方法
-        builder.httpMethod(detectHttpMethod(doc.text()));
-
-        // 检测端点
-        builder.endpoint(detectEndpoint(doc.text()));
+        String uriText = extractUriSectionText(doc);
+        builder.httpMethod(extractHttpMethod(uriText.isBlank() ? doc.text() : uriText));
+        builder.endpoint(extractEndpoint(uriText.isBlank() ? doc.text() : uriText));
 
         return builder.build();
     }
@@ -291,5 +333,56 @@ public class HuaweiCloudApiParser {
         }
 
         return params;
+    }
+
+    private String resolveApiName(Document doc, String apiName, String sourceUrl) {
+        if (apiName != null && !apiName.isBlank()) {
+            return apiName;
+        }
+
+        String nameFromUrl = resolveApiNameFromUrl(sourceUrl);
+        if (nameFromUrl != null) {
+            return nameFromUrl;
+        }
+
+        String title = doc.title();
+        Matcher matcher = API_NAME_PATTERN.matcher(title);
+        if (matcher.find()) {
+            return matcher.group();
+        }
+
+        return "HuaweiCloudApi";
+    }
+
+    private String resolveApiNameFromUrl(String sourceUrl) {
+        try {
+            String path = URI.create(sourceUrl).getPath();
+            String lastSegment = path.substring(path.lastIndexOf('/') + 1, path.lastIndexOf('.'));
+            if (!lastSegment.isBlank()) {
+                return lastSegment;
+            }
+        } catch (Exception ignored) {
+            // fall back to generic name
+        }
+        return null;
+    }
+
+    private String extractUriSectionText(Document doc) {
+        Element uriHeading = doc.selectFirst("h1:matchesOwn(^URI$), h2:matchesOwn(^URI$), h3:matchesOwn(^URI$), h4:matchesOwn(^URI$)");
+        if (uriHeading == null) {
+            uriHeading = doc.selectFirst("h1:containsOwn(URI), h2:containsOwn(URI), h3:containsOwn(URI), h4:containsOwn(URI)");
+        }
+        if (uriHeading == null) {
+            return "";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        for (Element sibling = uriHeading.nextElementSibling(); sibling != null; sibling = sibling.nextElementSibling()) {
+            if (sibling.tagName().matches("h1|h2|h3|h4")) {
+                break;
+            }
+            sb.append(sibling.text()).append('\n');
+        }
+        return sb.toString();
     }
 }

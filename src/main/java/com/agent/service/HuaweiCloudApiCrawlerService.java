@@ -51,35 +51,31 @@ public class HuaweiCloudApiCrawlerService {
         List<String> errors = new ArrayList<>();
 
         try {
-            // 抓取网页内容
-            Document doc = webCrawler.crawl(url);
-            String htmlContent = doc.text();
-            String sourceUrl = url;
+            String htmlContent = webCrawler.fetchHtml(url);
+            List<ApiMetadata> apis = new ArrayList<>();
 
-            // 解析API信息
-            List<ApiMetadata> apis = apiParser.parse(htmlContent, sourceUrl);
-            logger.info("Parsed {} APIs from document", apis.size());
+            if (apiParser.isDirectoryPage(url)) {
+                List<String> detailUrls = apiParser.discoverDetailPageUrls(htmlContent, url);
+                logger.info("Discovered {} detail pages from directory {}", detailUrls.size(), url);
 
-            // 保存每个API到元数据存储
-            for (ApiMetadata api : apis) {
-                try {
-                    metadataStore.save(api);
-                    indexedApis.add(api);
-
-                    // 同时添加到向量存储
-                    String content = buildContent(api);
-                    Metadata metadata = new Metadata();
-                    metadata.put("source", sourceUrl);
-                    metadata.put("apiId", api.getApiId());
-                    metadata.put("type", DocumentSourceType.WEB_PAGE.name());
-                    Document vectorDoc = Document.from(content, metadata);
-                    documentProcessor.processAndStore(vectorDoc);
-
-                } catch (SQLException e) {
-                    logger.error("Failed to save API metadata: {}", api.getMethodName(), e);
-                    errors.add("Failed to save: " + api.getMethodName() + " - " + e.getMessage());
+                for (String detailUrl : detailUrls) {
+                    try {
+                        String detailHtml = webCrawler.fetchHtml(detailUrl);
+                        ApiMetadata api = apiParser.parseApiDetail(detailHtml, detailUrl, null);
+                        if (api != null) {
+                            apis.add(api);
+                        }
+                    } catch (IOException e) {
+                        logger.warn("Failed to crawl detail page: {}", detailUrl, e);
+                        errors.add("Failed to crawl detail page: " + detailUrl + " - " + e.getMessage());
+                    }
                 }
+            } else {
+                apis = apiParser.parse(htmlContent, url);
             }
+
+            logger.info("Parsed {} APIs from document", apis.size());
+            saveApis(apis, indexedApis, errors);
 
             long duration = System.currentTimeMillis() - startTime;
             logger.info("Crawl completed: {} APIs indexed, {} errors, duration: {}ms",
@@ -91,6 +87,27 @@ public class HuaweiCloudApiCrawlerService {
             logger.error("Failed to crawl URL: {}", url, e);
             errors.add("Crawl failed: " + e.getMessage());
             return new CrawlResult(0, 1, System.currentTimeMillis() - startTime, errors);
+        }
+    }
+
+    private void saveApis(List<ApiMetadata> apis, List<ApiMetadata> indexedApis, List<String> errors) {
+        for (ApiMetadata api : apis) {
+            try {
+                metadataStore.save(api);
+                indexedApis.add(api);
+
+                String content = buildContent(api);
+                Metadata metadata = new Metadata();
+                metadata.put("source", api.getSourceLocation());
+                metadata.put("apiId", api.getApiId());
+                metadata.put("type", DocumentSourceType.WEB_PAGE.name());
+                Document vectorDoc = Document.from(content, metadata);
+                documentProcessor.processAndStore(vectorDoc);
+
+            } catch (SQLException e) {
+                logger.error("Failed to save API metadata: {}", api.getMethodName(), e);
+                errors.add("Failed to save: " + api.getMethodName() + " - " + e.getMessage());
+            }
         }
     }
 

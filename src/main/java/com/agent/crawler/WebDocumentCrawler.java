@@ -16,10 +16,7 @@ public class WebDocumentCrawler {
      * 抓取网页内容
      */
     public Document crawl(String url) throws IOException {
-        org.jsoup.nodes.Document doc = Jsoup.connect(url)
-                .userAgent("Mozilla/5.0")
-                .timeout(10000)
-                .get();
+        org.jsoup.nodes.Document doc = fetchDocument(url);
 
         String title = doc.title();
         String mainContent = extractMainContent(doc);
@@ -28,6 +25,23 @@ public class WebDocumentCrawler {
         metadata.put("source", url);
         metadata.put("title", title);
         return Document.from(mainContent, metadata);
+    }
+
+    /**
+     * 抓取原始HTML
+     */
+    public String fetchHtml(String url) throws IOException {
+        return fetchDocument(url).outerHtml();
+    }
+
+    /**
+     * 抓取并返回原始DOM
+     */
+    public org.jsoup.nodes.Document fetchDocument(String url) throws IOException {
+        return Jsoup.connect(url)
+                .userAgent("Mozilla/5.0")
+                .timeout(10000)
+                .get();
     }
 
     /**
