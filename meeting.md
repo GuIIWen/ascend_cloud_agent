@@ -6,6 +6,189 @@
 - 建议把最新记录放在文件最上方，便于事后快速查看。
 - 记录至少包含：时间、主题、范围、统一结论、问题分级、行动项、关键证据。
 
+## 2026-03-23 14:37:12 +0800
+
+### 主题
+Sprint-1 第一批交付验收：README、基线 CI、验证脚本、配置与设计文档口径收口
+
+### 参与角色
+- P10 主线程：按文档与会议纪要口径验收并放行
+- P8-A：README、CI、验证脚本交付
+- P8-B：配置与设计文档口径收口
+
+### 评审范围
+- `README.md`
+- `.github/workflows/ci.yml`
+- `scripts/verify_baseline.sh`
+- `docs/CONFIG_GUIDE.md`
+- `docs/ARCHITECTURE.md`
+- `docs/DESIGN.md`
+- `docs/KNOWLEDGE_BASE.md`
+
+### 统一结论
+- Sprint-1 第一批交付已达到放行条件。
+- 仓库已补齐 README、最小 CI 和本地基线验证脚本，公开仓不再依赖纯口头说明。
+- `CONFIG_GUIDE` 与三份设计文档已完成当前基线口径收口，`8000` 旧地址已从本轮验收范围移除。
+- 当前放行结论基于“compile + 关键单测 + 文档口径一致”成立；CI 仍未覆盖 Chroma 集成态，这属于已知后续项，不阻塞本批放行。
+
+### 验收结果
+- `bash scripts/verify_baseline.sh`
+  - 结果：通过
+- `timeout 120 mvn -q -DskipTests compile`
+  - 结果：通过
+- `timeout 120 mvn -q -Dtest=KnowledgeBaseConfigBindingTest,AppConfigModelSelectionTest,AppConfigVectorStoreSelectionTest,HttpModelServiceTest,HuaweiCloudApiCrawlerServiceTest test`
+  - 结果：通过
+- 文档一致性检查
+  - `rg -n "8000" docs/CONFIG_GUIDE.md docs/ARCHITECTURE.md docs/DESIGN.md docs/KNOWLEDGE_BASE.md README.md .github/workflows/ci.yml scripts/verify_baseline.sh`
+  - 结果：无命中
+
+### 核心问题
+
+#### P1
+- CI 当前只覆盖快速基线门禁，尚未包含 Chroma 集成态与“重启后检索一致性”自动化验证。
+
+#### P2
+- README 当前提供的是本地标准路径，不等同于完整部署手册；后续仍需补 README 与 docs 的职责边界说明。
+
+### 决策
+- 放行本批交付，进入 Sprint-1 下一阶段。
+- 下一阶段优先处理“集成验收自动化”和“数据目录长期默认策略”，不回头重做本批已通过项。
+
+### 行动项
+- P10：把本轮交付结果提交并推送到远端主分支。
+- 后续执行层：继续推进 Chroma 集成验收和持久化目录策略收口。
+
+### 关键证据
+- `README.md`
+- `.github/workflows/ci.yml`
+- `scripts/verify_baseline.sh`
+- `docs/CONFIG_GUIDE.md`
+- `docs/ARCHITECTURE.md`
+- `docs/DESIGN.md`
+- `docs/KNOWLEDGE_BASE.md`
+
+## 2026-03-23 14:22:49 +0800
+
+### 主题
+Sprint-1 战略启动：工程化基线固化、P9 分工与文档验收口径
+
+### 参与角色
+- P10 主线程：定战略、拍板基线合同、定义文档验收与放行口径
+- P9：拆职责边界、交付节奏、风险点与依赖顺序
+
+### 评审范围
+- `docs/ARCHITECTURE.md`
+- `docs/DESIGN.md`
+- `docs/KNOWLEDGE_BASE.md`
+- `docs/CONFIG_GUIDE.md`
+- `meeting.md`
+- `scripts/install_chroma_0520.sh`
+- `scripts/start_chroma_22333.sh`
+- `src/main/resources/application.yml.template`
+- `pom.xml`
+
+### 统一结论
+- Sprint-1 主线不是扩功能，而是把当前已跑通的闭环固化成“可重复、可验收、可公开协作”的工程基线。
+- 当前对外可宣称的基线只包括：`Java 17 编译目标 + JDK 21 运行时 + Spring Boot 2.7.18 + Chroma 0.5.20 + 22333 + Huawei Cloud 目录页抓取/搜索/重启后检索闭环`。
+- `ARCHITECTURE / DESIGN / KNOWLEDGE_BASE` 三份文档继续保留“目标设计”价值，但 Sprint-1 期间的放行判断以“文档中的当前状态说明 + meeting.md 决议 + 可验证证据”共同成立为准。
+
+### 战略输入
+
+#### 方向
+- 把知识库原型从“单机可跑”收口为“团队可重复运行、对外可自证”的基线版本。
+
+#### 成功标准
+- 干净环境下存在唯一标准路径，能够完成：安装依赖、启动 Chroma、启动服务、健康检查、抓取目录页、搜索结果校验、服务重启后再次搜索。
+- 配置入口、默认端口、版本矩阵、脚本、文档、会议纪要之间不存在冲突口径。
+- 对外声明能力时，只使用 `Implemented 且可验证` 的表述，不再混淆目标设计和当前实现。
+
+#### 基线合同（P10 拍板）
+- 编译目标：`Java 17`
+- 运行时：`JDK 21`
+- Spring Boot 主版本：`2.7.18`，本 Sprint 冻结，不做大版本迁移
+- Chroma 版本：`0.5.20`
+- 向量库端口：`22333`
+- 向量库类型：`chroma`
+- Sprint-1 不引入新的模型链路、数据源类型和端到端主功能
+
+#### 不做什么
+- 不推进 `UseCaseOptimizer`、`ApiTestGenerator`、零交互 Agent 主链路的新实现。
+- 不接新的文档源能力，如 `OPENAPI_FILE` 全量补齐、GraphQL、gRPC。
+- 不升级 `langchain4j-chroma`、Chroma 主版本、Spring Boot 主版本。
+
+### P9 编制
+- `P9-A（工程化基线 Owner）`
+- 负责：构建与运行基线、脚本标准、CI 门禁、最小验收链路、失败可诊断性。
+- 交付边界：不定义业务功能，不扩数据源，只收口“怎么稳定 build / run / verify”。
+- `P9-B（配置与持久化治理 Owner）`
+- 负责：配置入口收口、运行时/模板一致性、向量库与元数据库目录策略、重启一致性验证、文档状态治理。
+- 交付边界：不做新功能扩张，只治理“配置生效、数据不丢、文档不漂移”。
+- `P9 间接口`
+- P9-A 输出标准化验收命令和门禁层级；P9-B 提供配置与持久化场景样本及放行证据；两者统一回写到文档与 `meeting.md`。
+
+### Sprint-1 顺序
+1. 先冻结基线合同，禁止边做边改版本口径。
+2. 先做配置入口收口，再做运行脚本与启动链路固化。
+3. 在运行链路稳定后，再做“索引 -> 搜索 -> 重启 -> 再搜索”的持久化一致性验收。
+4. 最后落 CI/验收门禁和文档收口，避免 CI 与文档建立在漂移口径之上。
+
+### 文档验收口径
+
+#### `docs/ARCHITECTURE.md`
+- 必须持续明确“目标架构”和“当前实现状态”是两层口径。
+- `向量数据库 + 元数据库` 的双存储分层不能与当前实现结论冲突。
+- 任何未实现模块必须保持 `Draft/Partial/Stub` 标识，禁止冒充已完成。
+
+#### `docs/DESIGN.md`
+- 必须明确“交互式候选 API 确认”仍是目标流程，不等价于当前已实现。
+- 配置管理描述必须和当前可用入口一致，不能再保留与实际运行无关的旧口径。
+- 不能把“写入测试文件”等未落地能力写成当前可验收项。
+
+#### `docs/KNOWLEDGE_BASE.md`
+- 当前实现状态表必须继续反映真实实现边界。
+- 存储层描述必须与当前基线一致：`Chroma 0.5.20 + SQLite`，且重启一致性由实测证据支撑。
+- 对 `OPENAPI_FILE` 等未补齐能力，必须继续标注 `Stub`，不能借文档放大承诺。
+
+#### `docs/CONFIG_GUIDE.md`
+- 必须纠正过期示例，尤其是 `vector-store.url` 仍写 `8000` 的旧口径。
+- 需要和 `application.yml.template`、脚本、环境变量入口保持一致。
+- 不允许出现与当前版本矩阵冲突的安装/启动说明。
+
+### 放行口径
+- 合并门禁最低要求：`compile + 关键单测`。
+- Sprint-1 发布放行要求：`Chroma 启动 -> 服务启动 -> /actuator/health -> Huawei Cloud 目录抓取 -> ListWorkflows 搜索 -> 服务重启后再次搜索` 全链路通过。
+- 文档放行要求：上述四份文档与 `meeting.md` 在版本、端口、状态标记、能力边界上无冲突。
+
+### 核心问题
+
+#### P1
+- 当前仓库缺少 README 和 `.github/workflows`，导致公开仓状态下的“如何跑起来、如何验收”仍主要依赖会议纪要和人工经验。
+- `docs/CONFIG_GUIDE.md` 仍保留 `http://localhost:8000` 等过期口径，和当前 `22333` 基线冲突。
+
+#### P2
+- 当前有效运行态依然依赖 `/tmp` 目录，适合当前闭环验证，但还不是长期默认策略。
+- 编译目标为 `17`、运行时使用 `21` 的事实已经稳定，但文档口径尚未完全收口。
+
+### 决策
+- Sprint-1 先做基线固化，不再并行推进新功能。
+- P10 按文档与会议纪要联合放行，不接受“代码看起来像支持”但文档和验证证据不闭环的交付。
+- 所有后续任务必须围绕本条会议纪要的基线合同和验收口径展开。
+
+### 行动项
+- P9-A：产出工程化基线任务树，覆盖脚本、CI、运行探测、回归口径。
+- P9-B：产出配置与持久化治理任务树，覆盖配置入口、目录策略、文档状态收口。
+- P10：以本条会议纪要为 Sprint-1 放行标准，后续按文档和证据验收。
+
+### 关键证据
+- `docs/ARCHITECTURE.md`
+- `docs/DESIGN.md`
+- `docs/KNOWLEDGE_BASE.md`
+- `docs/CONFIG_GUIDE.md`
+- `src/main/resources/application.yml.template`
+- `scripts/install_chroma_0520.sh`
+- `scripts/start_chroma_22333.sh`
+- `meeting.md`
+
 ## 2026-03-23 11:40:47 +0800
 
 ### 主题
