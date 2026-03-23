@@ -93,21 +93,14 @@ This produces `target/ascend-agent-1.0.0.jar` for the next step.
 
 ### 5. Start the service
 
-The repository baseline is validated with Chroma on `22333`. The current automation entrypoints are the Chroma scripts above; the application itself is still started directly via `java -jar`. Pass the data directory and vector store URL explicitly so the runtime follows the approved directory contract:
+The repository baseline is validated with Chroma on `22333`. The preferred service entrypoint is [scripts/start_service.sh](/root/ascend_agent/scripts/start_service.sh), which derives logs, pid files, and `-Dascend.agent.*` runtime flags from `ASCEND_AGENT_HOME`:
 
 ```bash
 export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 export PATH="$JAVA_HOME/bin:$PATH"
 export ASCEND_AGENT_HOME="$(pwd)/.ascend_agent"
-setsid nohup java \
-  -Dascend.agent.home="$ASCEND_AGENT_HOME" \
-  -Dascend.agent.data-dir="$ASCEND_AGENT_HOME/db" \
-  -jar target/ascend-agent-1.0.0.jar \
-  --knowledge-base.vector-store.type=chroma \
-  --knowledge-base.vector-store.url=http://127.0.0.1:22333 \
-  --knowledge-base.vector-store.collection=api-knowledge-base \
-  >"$ASCEND_AGENT_HOME/logs/ascend-agent.log" 2>&1 < /dev/null &
-echo $! >"$ASCEND_AGENT_HOME/pids/ascend-agent.pid"
+export ASCEND_AGENT_PORT=8080
+bash scripts/start_service.sh
 ```
 
 Health check:
@@ -133,7 +126,7 @@ Default layout:
 Override strategy:
 
 1. `-Dascend.agent.data-dir=...` has the highest priority for service-owned local database files.
-2. `-Dascend.agent.home=...` or `ASCEND_AGENT_HOME=...` defines the approved contract root used to derive runtime paths in wrapper invocations and documentation.
+2. `-Dascend.agent.home=...` or `ASCEND_AGENT_HOME=...` defines the approved contract root used to derive runtime paths in the application and wrapper scripts.
 3. If you need to force current scripts onto the contract today, export `CHROMA_VENV_DIR`, `CHROMA_DATA_DIR`, `CHROMA_LOG_FILE`, and `CHROMA_PID_FILE` explicitly from `ASCEND_AGENT_HOME`.
 
 The repository should no longer be documented as defaulting to `/tmp` for long-lived local state. If a script still has an internal `/tmp` fallback, treat it as compatibility-only and override it explicitly.
@@ -172,7 +165,7 @@ CI intentionally does not provision Chroma or boot the full application. It is a
 
 - Chroma is not provisioned inside CI. Local persistence validation still requires a running Chroma instance.
 - Local runtime should use Chroma `0.5.20` on `22333`. Do not mix this README baseline with ad hoc `1.5.x` commands.
-- The repository does not currently provide a single end-to-end bootstrap script for both Chroma and the Spring Boot service. Use the documented Chroma scripts plus explicit JVM parameters.
+- The repository does not currently provide a single command that provisions Chroma and the Spring Boot service together. Use the documented Chroma scripts plus [scripts/start_service.sh](/root/ascend_agent/scripts/start_service.sh).
 - The project contains additional local-only files and environment-specific workflows not covered by this README.
 - For local service startup, pass the vector store URL and data directory explicitly if your local config still points somewhere else.
 

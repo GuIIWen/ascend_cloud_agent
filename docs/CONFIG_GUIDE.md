@@ -59,8 +59,9 @@
 
 当前落地方式：
 - Chroma 脚本通过显式环境变量覆盖：`CHROMA_VENV_DIR`、`CHROMA_DATA_DIR`、`CHROMA_LOG_FILE`、`CHROMA_PID_FILE`
-- 应用当前显式消费并覆盖的是：`-Dascend.agent.data-dir=...`
-- `ascend.agent.home` / `ASCEND_AGENT_HOME` 当前主要作为目录合同根与派生变量来源；若要严格落到该合同，需要同时显式传入 `ascend.agent.data-dir` 和 `CHROMA_*` 覆盖变量
+- 应用当前显式消费并覆盖的是：`ascend.agent.data-dir`、`ascend.agent.home`、`ASCEND_AGENT_HOME`
+- 应用本地数据库目录优先级：`ascend.agent.data-dir` > `ascend.agent.home` > `ASCEND_AGENT_HOME` > `./.ascend_agent/db`
+- 若要让 Chroma 也严格落到该合同，需要同时显式传入 `CHROMA_*` 覆盖变量，或直接使用仓库脚本默认派生路径
 - 若同时传了 `ascend.agent.data-dir` 与 `ascend.agent.home`，以前者为准
 - 若某些历史脚本内部仍保留 `/tmp` 回退值，应视为历史兼容或临时覆盖，不是长期默认路径
 

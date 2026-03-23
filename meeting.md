@@ -6,6 +6,78 @@
 - 建议把最新记录放在文件最上方，便于事后快速查看。
 - 记录至少包含：时间、主题、范围、统一结论、问题分级、行动项、关键证据。
 
+## 2026-03-23 16:41:11 +0800
+
+### 主题
+Sprint-1 第二批交付验收：`ASCEND_AGENT_HOME` 目录合同、运行时路径优先级与服务常驻启动闭环
+
+### 参与角色
+- P10 主线程：定验收口径、并行调度 P9、完成最终放行判断
+- P9-Runtime：审查运行根合同是否形成可执行闭环
+- P9-Docs：审查 README、docs、meeting 口径是否一致
+
+### 评审范围
+- `src/main/java/com/agent/config/AppConfig.java`
+- `src/test/java/com/agent/config/AppConfigRuntimePathTest.java`
+- `scripts/install_chroma_0520.sh`
+- `scripts/start_chroma_22333.sh`
+- `scripts/start_service.sh`
+- `README.md`
+- `docs/CONFIG_GUIDE.md`
+- `meeting.md`
+
+### 统一结论
+- 第二批“目录合同与运行根”已达到放行条件。
+- 长期默认运行根统一为 `ASCEND_AGENT_HOME=./.ascend_agent/`；`tools/chroma-venv-0520`、`chroma`、`db`、`logs`、`pids` 均从该根派生。
+- 应用本地数据库目录优先级已固化为：`ascend.agent.data-dir` > `ascend.agent.home` > `ASCEND_AGENT_HOME` > `./.ascend_agent/db`。
+- `meeting.md` 中早期出现的 `/tmp/*`、`/root/.ascend_agent/*` 记录属于历史验证路径，不再代表当前默认目录策略；对外口径以 `README.md` 与 `docs/CONFIG_GUIDE.md` 为准。
+- 本轮验收额外暴露出一个本地环境问题：被 `.gitignore` 忽略的 `src/main/resources/application.yml` 曾以 GBK 编码保存，导致旧打包产物启动时报 `YAMLException -> MalformedInputException`；该问题已在本地转为 UTF-8 后重打包验证，不属于仓库模板口径缺陷。
+
+### 验收结果
+- `bash -n scripts/install_chroma_0520.sh`
+  - 结果：通过
+- `bash -n scripts/start_chroma_22333.sh`
+  - 结果：通过
+- `bash -n scripts/start_service.sh`
+  - 结果：通过
+- `timeout 180 mvn -q -DskipTests compile`
+  - 结果：通过
+- `timeout 180 mvn -q -Dtest=AppConfigRuntimePathTest,KnowledgeBaseConfigBindingTest,AppConfigModelSelectionTest,AppConfigVectorStoreSelectionTest test`
+  - 结果：通过
+- 运行态验证
+  - `env ASCEND_AGENT_HOME=/root/ascend_agent/.ascend_agent ASCEND_AGENT_PORT=18080 JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 bash scripts/start_service.sh`
+  - 结果：通过，常驻进程 PID `2348345`
+  - `curl -sS -i -m 10 http://127.0.0.1:18080/actuator/health`
+  - 结果：`HTTP/1.1 200`，返回 `{"status":"UP",...}`
+- 目录合同验证
+  - `ls -la .ascend_agent .ascend_agent/db .ascend_agent/logs .ascend_agent/pids`
+  - 结果：`db/logs/pids` 已从 `ASCEND_AGENT_HOME` 正确派生
+
+### 核心问题
+
+#### P1
+- 目录合同虽然已闭环，但仍缺少“一键集成验收脚本”，当前运行态验收还依赖一组手工命令串联。
+
+#### P2
+- `meeting.md` 历史记录保留了早期 `/tmp` 证据，若不在新纪要中明确声明“已被目录合同取代”，外部读者容易误判默认目录策略。
+
+### 决策
+- 放行第二批交付，不回退到 `/tmp` 作为长期默认运行目录。
+- 从本条纪要开始，目录合同的唯一事实来源定义为：`ASCEND_AGENT_HOME=./.ascend_agent/`，`/tmp` 仅允许作为显式覆盖或历史兼容路径。
+- README 的服务启动主入口正式切换为 `scripts/start_service.sh`；手工 `java -jar` 只保留为故障排查路径，不再作为主文档入口。
+
+### 行动项
+- P10：提交本轮 `meeting.md`、README、CONFIG_GUIDE 收口改动并推送远端。
+- 后续执行层：补一个运行根合同的一键验收脚本，把 Chroma 启动、服务启动、健康检查、目录校验固化为单条命令。
+
+### 关键证据
+- `src/main/java/com/agent/config/AppConfig.java`
+- `src/test/java/com/agent/config/AppConfigRuntimePathTest.java`
+- `scripts/start_service.sh`
+- `README.md`
+- `docs/CONFIG_GUIDE.md`
+- `.ascend_agent/logs/service.log`
+
 ## 2026-03-23 14:37:12 +0800
 
 ### 主题
