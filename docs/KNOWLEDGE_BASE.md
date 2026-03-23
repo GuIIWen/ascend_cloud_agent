@@ -24,6 +24,7 @@
 当前基线结论：
 - 本仓库以“知识库基础设施原型”为主，当前编译/测试基线未稳定，本文中的性能指标与端到端指标未被仓库自证。
 - 当前开发态向量存储基线已收口为 Chroma `0.5.20`，默认地址 `127.0.0.1:22333`，安装/启动入口分别为 `scripts/install_chroma_0520.sh` 和 `scripts/start_chroma_22333.sh`。
+- 当前长期默认目录合同为 `ASCEND_AGENT_HOME=./.ascend_agent/`；`tools/chroma-venv-0520`、`chroma`、`db`、`logs`、`pids` 为对外默认布局，`/tmp` 仅允许作为历史兼容或临时覆盖。
 - Java 17 编译目标属于 Sprint-1 目标口径；运行时统一口径为 JDK 21，“是否已对齐”以实际构建/CI 结果为准（避免把目标口径误读为已验证基线）。
 - 本文后续所有“实现代码示例”均视作示意，不应被解读为当前实现的真实等价物。
 
@@ -363,15 +364,22 @@ public class WebDocumentCrawler {
 ### 6.3 Chroma启动
 
 ```bash
+export ASCEND_AGENT_HOME="$(pwd)/.ascend_agent"
+export CHROMA_VENV_DIR="$ASCEND_AGENT_HOME/tools/chroma-venv-0520"
+export CHROMA_DATA_DIR="$ASCEND_AGENT_HOME/chroma"
+export CHROMA_LOG_FILE="$ASCEND_AGENT_HOME/logs/chroma-22333.log"
+export CHROMA_PID_FILE="$ASCEND_AGENT_HOME/pids/chroma-22333.pid"
+
 scripts/install_chroma_0520.sh
 scripts/start_chroma_22333.sh
 ```
 
-默认参数：
+按目录合同派生后的推荐路径：
 - 地址：`127.0.0.1:22333`
-- 数据目录：`/tmp/chroma-data-22333`
-- 日志：`/tmp/chroma-22333.log`
-- PID：`/tmp/chroma-22333.pid`
+- venv：`./.ascend_agent/tools/chroma-venv-0520`
+- 数据目录：`./.ascend_agent/chroma`
+- 日志：`./.ascend_agent/logs/chroma-22333.log`
+- PID：`./.ascend_agent/pids/chroma-22333.pid`
 
 ### 6.4 Milvus启动
 

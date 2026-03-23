@@ -9,7 +9,7 @@
 | 项目 | 当前基线 | 说明 |
 |------|----------|------|
 | Java 编译目标（目标口径） | 17 | Sprint-1 目标口径；“是否已对齐”以实际构建/CI 结果为准 |
-| Java 编译目标（当前仓库配置） | 1.8 | 见 `pom.xml` 中 `maven.compiler.source` / `maven.compiler.target`；待升级对齐到 17 |
+| Java 编译目标（当前仓库配置） | 17 | 见 `pom.xml` 中 `maven.compiler.source` / `maven.compiler.target` |
 | Java 运行时（已验证口径） | JDK 21 | 当前运行口径统一为 JDK 21 |
 | Spring Boot | 2.7.18 | 见 `pom.xml` |
 | 开发态向量库 | Chroma 0.5.20 | 以仓库脚本入口为准 |
@@ -19,6 +19,7 @@
 | Chroma 启动入口 | `scripts/start_chroma_22333.sh` | 默认监听 `127.0.0.1:22333` |
 | 应用配置模板 | `src/main/resources/application.yml.template` | 基线模板，不会自动生效 |
 | 应用运行入口 | `target/ascend-agent-1.0.0.jar` | 运行时建议显式设置 `JAVA_HOME`/`PATH` |
+| 长期默认运行根（目录合同） | `./.ascend_agent/` | 以 `ASCEND_AGENT_HOME` 为根管理本地持久化目录 |
 
 ### 0.2 配置优先级与生效入口
 
@@ -34,6 +35,34 @@
 - Chroma 的安装/启动以脚本入口为准，不再以历史文档中的手敲命令为准。
 - 环境变量与配置文件冲突时，以环境变量为准。
 - 若需要明确指定配置文件路径，使用 Spring Boot 原生参数：`--spring.config.location=/abs/path/application.yml`（不属于仓库自研能力，仅为运行方式建议）。
+
+### 0.3 目录合同与覆盖优先级
+
+长期默认目录策略：
+- `ASCEND_AGENT_HOME=./.ascend_agent/`
+- 不再把 `/tmp` 作为默认长期运行目录
+
+目录优先级：
+1. `ascend.agent.data-dir`
+2. `ascend.agent.home` / `ASCEND_AGENT_HOME`
+3. 默认 `./.ascend_agent/`
+
+默认目录布局：
+
+| 相对路径 | 用途 |
+|----------|------|
+| `tools/chroma-venv-0520` | Chroma Python venv 与 CLI |
+| `chroma` | Chroma 持久化数据目录 |
+| `db` | 服务本地数据库目录 |
+| `logs` | Chroma 与应用日志 |
+| `pids` | 后台进程 PID 文件 |
+
+当前落地方式：
+- Chroma 脚本通过显式环境变量覆盖：`CHROMA_VENV_DIR`、`CHROMA_DATA_DIR`、`CHROMA_LOG_FILE`、`CHROMA_PID_FILE`
+- 应用当前显式消费并覆盖的是：`-Dascend.agent.data-dir=...`
+- `ascend.agent.home` / `ASCEND_AGENT_HOME` 当前主要作为目录合同根与派生变量来源；若要严格落到该合同，需要同时显式传入 `ascend.agent.data-dir` 和 `CHROMA_*` 覆盖变量
+- 若同时传了 `ascend.agent.data-dir` 与 `ascend.agent.home`，以前者为准
+- 若某些历史脚本内部仍保留 `/tmp` 回退值，应视为历史兼容或临时覆盖，不是长期默认路径
 
 ## 1. 应用配置结构
 
@@ -132,15 +161,21 @@ knowledge-base:
 ### 3.1 当前推荐路径
 
 ```bash
+export ASCEND_AGENT_HOME="$(pwd)/.ascend_agent"
+export CHROMA_VENV_DIR="$ASCEND_AGENT_HOME/tools/chroma-venv-0520"
+export CHROMA_DATA_DIR="$ASCEND_AGENT_HOME/chroma"
+export CHROMA_LOG_FILE="$ASCEND_AGENT_HOME/logs/chroma-22333.log"
+export CHROMA_PID_FILE="$ASCEND_AGENT_HOME/pids/chroma-22333.pid"
+
 scripts/install_chroma_0520.sh
 scripts/start_chroma_22333.sh
 ```
 
-默认参数：
-- venv：`/tmp/chroma-venv-0520`
-- 数据目录：`/tmp/chroma-data-22333`
-- 日志：`/tmp/chroma-22333.log`
-- PID：`/tmp/chroma-22333.pid`
+按目录合同派生后的推荐路径：
+- venv：`./.ascend_agent/tools/chroma-venv-0520`
+- 数据目录：`./.ascend_agent/chroma`
+- 日志：`./.ascend_agent/logs/chroma-22333.log`
+- PID：`./.ascend_agent/pids/chroma-22333.pid`
 - 地址：`127.0.0.1:22333`
 
 ### 3.2 验证命令
@@ -187,17 +222,22 @@ knowledge-base:
 - 运行时：JDK 21
 - 服务端口：`8080`
 - 健康检查：`/actuator/health`
+- 长期默认运行根：`./.ascend_agent/`
 
 ```bash
 export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 export PATH=$JAVA_HOME/bin:$PATH
+export ASCEND_AGENT_HOME="$(pwd)/.ascend_agent"
 
 export EMBEDDING_API_URL=https://your-api.com/v1/embeddings
 export EMBEDDING_API_KEY=your-key
 export LLM_API_URL=https://your-llm-api.com/v1/chat/completions
 export LLM_API_KEY=your-llm-key
 
-java -jar target/ascend-agent-1.0.0.jar
+java \
+  -Dascend.agent.home="$ASCEND_AGENT_HOME" \
+  -Dascend.agent.data-dir="$ASCEND_AGENT_HOME/db" \
+  -jar target/ascend-agent-1.0.0.jar
 ```
 
 ## 7. 常见问题
@@ -205,6 +245,7 @@ java -jar target/ascend-agent-1.0.0.jar
 | 问题 | 现象 | 处理建议 |
 |------|------|----------|
 | Chroma 连不上 | 请求仍指向历史旧端口 | 检查是否还有旧配置覆盖 `knowledge-base.vector-store.url` |
+| 本地文件散落在 `/tmp` | 启动后日志/数据目录不在仓库下 | 显式设置 `ASCEND_AGENT_HOME`，并同步导出 `CHROMA_*` 覆盖变量 |
 | 配置不生效 | 修改了模板但运行结果未变 | 确认修改的是运行时 `application.yml`，不是仅修改模板 |
 | Java 启动失败 | `java -version` 不符合预期 | 显式设置 `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64` |
 | 模型调用异常 | 401/超时/空响应 | 优先检查对应 `*_API_URL` / `*_API_KEY` 环境变量 |

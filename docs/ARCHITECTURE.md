@@ -20,7 +20,7 @@
 | KnowledgeBaseService v1 | 索引/检索基础设施 | Partial | 构建基线冲突、索引生命周期/幂等性与元数据 round-trip 不成立 |
 | 知识库 v2（TestScenario/Builder/Retriever/Service） | 场景化检索 | Partial | YAML 加载器卡死风险；默认检索装配不稳定；索引更新与检索实体回源不闭环 |
 | Spring Boot 接入层（Config/Controller） | 运行外壳/对外 API | Partial | 已具备预构建 JAR 运行外壳；服务可在 `8080` 暴露 `/actuator/health`，但不代表业务主链路已闭环 |
-| Chroma 开发态向量存储 | 向量检索基础设施 | Implemented | Sprint-1 基线锁定为 Chroma `0.5.20`，脚本入口为 `scripts/install_chroma_0520.sh` / `scripts/start_chroma_22333.sh`，默认地址 `127.0.0.1:22333` |
+| Chroma 开发态向量存储 | 向量检索基础设施 | Implemented | Sprint-1 基线锁定为 Chroma `0.5.20`，脚本入口为 `scripts/install_chroma_0520.sh` / `scripts/start_chroma_22333.sh`，默认地址 `127.0.0.1:22333`，长期目录合同根为 `ASCEND_AGENT_HOME=./.ascend_agent/` |
 | UseCaseOptimizer | 用例优化层 | Draft | 仅有文档与架构占位，当前仓库未实现 |
 | ApiTestGenerator / CodeValidator 等 | 代码生成层 | Draft | 仅有文档与架构占位，当前仓库未实现 |
 | 零交互引擎 / 主 Agent | 应用层主入口 | Draft | 仅有文档与架构占位，当前仓库未实现 |
@@ -30,6 +30,7 @@
 当前基线结论：
 - 本仓库当前主要是“知识库原型 + v2 骨架”，尚未形成架构图中的端到端零交互闭环。
 - 当前运行口径已收口为：JDK 21 运行时、应用默认 `8080`、Chroma 开发态默认 `127.0.0.1:22333`；Java 17 编译目标属于 Sprint-1 目标口径，“是否已对齐”以实际构建/CI 结果为准。
+- 长期默认目录合同已收口为 `ASCEND_AGENT_HOME=./.ascend_agent/`；`tools/chroma-venv-0520`、`chroma`、`db`、`logs`、`pids` 都应从该根目录派生，不再把 `/tmp` 视为长期默认路径。
 - “服务能启动”只说明运行壳存在，不等价于图中所有模块都已实现。
 
 后续治理约定：

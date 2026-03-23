@@ -9,6 +9,7 @@
 当前基线：
 - 本文件中的“用户确认候选 API”属于交互式流程描述；而 [ARCHITECTURE.md](/root/ascend_agent/docs/ARCHITECTURE.md) 的目标叙事是“零交互”。两者不应同时被解读为“已实现”，需在实现前先统一产品形态与链路取舍。
 - 当前已收口的运行基线仅包括：JDK 21 运行时、Spring Boot 服务默认 `8080`、Chroma 开发态地址 `127.0.0.1:22333`；Java 17 编译目标属于 Sprint-1 目标口径，“是否已对齐”以实际构建/CI 结果为准。
+- 当前长期默认目录合同为 `ASCEND_AGENT_HOME=./.ascend_agent/`；若运行时需要强制对齐该合同，应显式传入 `-Dascend.agent.data-dir` 并用 `CHROMA_*` 环境变量覆盖脚本路径。
 - 文中任何“可运行/可写入文件”的步骤仍主要属于目标设计，不应被解读为当前仓库已完成闭环。
 
 后续治理：

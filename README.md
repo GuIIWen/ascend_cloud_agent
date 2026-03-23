@@ -9,11 +9,13 @@
 - Runtime JDK: `21`
 - Chroma: `0.5.20`
 - Local Chroma port: `22333`
-- Default local Chroma paths:
-  - venv: `/tmp/chroma-venv-0520`
-  - data: `/tmp/chroma-data-22333`
-  - log: `/tmp/chroma-22333.log`
-  - pid: `/tmp/chroma-22333.pid`
+- Default runtime root: `./.ascend_agent/`
+- Default directory layout:
+  - `./.ascend_agent/tools/chroma-venv-0520`
+  - `./.ascend_agent/chroma`
+  - `./.ascend_agent/db`
+  - `./.ascend_agent/logs`
+  - `./.ascend_agent/pids`
 
 ## Dependency Matrix
 
@@ -27,11 +29,20 @@
 
 ## Quick Start
 
-### 1. Prepare Java
+### 1. Prepare Java and runtime root
 
 ```bash
 export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 export PATH="$JAVA_HOME/bin:$PATH"
+export ASCEND_AGENT_HOME="$(pwd)/.ascend_agent"
+
+mkdir -p \
+  "$ASCEND_AGENT_HOME/tools" \
+  "$ASCEND_AGENT_HOME/chroma" \
+  "$ASCEND_AGENT_HOME/db" \
+  "$ASCEND_AGENT_HOME/logs" \
+  "$ASCEND_AGENT_HOME/pids"
+
 java -version
 ```
 
@@ -40,20 +51,25 @@ Expected: JDK `21.x`.
 ### 2. Install local Chroma 0.5.20
 
 ```bash
+export CHROMA_VENV_DIR="$ASCEND_AGENT_HOME/tools/chroma-venv-0520"
 bash scripts/install_chroma_0520.sh
 ```
 
 Expected output includes:
 
 ```text
-chroma venv: /tmp/chroma-venv-0520
+chroma venv: <ASCEND_AGENT_HOME>/tools/chroma-venv-0520
 chromadb version: 0.5.20
-binary: /tmp/chroma-venv-0520/bin/chroma
+binary: <ASCEND_AGENT_HOME>/tools/chroma-venv-0520/bin/chroma
 ```
 
 ### 3. Start local Chroma on 22333
 
 ```bash
+export CHROMA_VENV_DIR="$ASCEND_AGENT_HOME/tools/chroma-venv-0520"
+export CHROMA_DATA_DIR="$ASCEND_AGENT_HOME/chroma"
+export CHROMA_LOG_FILE="$ASCEND_AGENT_HOME/logs/chroma-22333.log"
+export CHROMA_PID_FILE="$ASCEND_AGENT_HOME/pids/chroma-22333.pid"
 bash scripts/start_chroma_22333.sh
 ```
 
@@ -77,18 +93,21 @@ This produces `target/ascend-agent-1.0.0.jar` for the next step.
 
 ### 5. Start the service
 
-The repository baseline is validated with Chroma on `22333`. Pass the vector store URL explicitly at startup so the service points at the local Chroma instance:
+The repository baseline is validated with Chroma on `22333`. The current automation entrypoints are the Chroma scripts above; the application itself is still started directly via `java -jar`. Pass the data directory and vector store URL explicitly so the runtime follows the approved directory contract:
 
 ```bash
 export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 export PATH="$JAVA_HOME/bin:$PATH"
+export ASCEND_AGENT_HOME="$(pwd)/.ascend_agent"
 setsid nohup java \
-  -Dascend.agent.data-dir=/root/ascend_agent/data \
+  -Dascend.agent.home="$ASCEND_AGENT_HOME" \
+  -Dascend.agent.data-dir="$ASCEND_AGENT_HOME/db" \
   -jar target/ascend-agent-1.0.0.jar \
   --knowledge-base.vector-store.type=chroma \
   --knowledge-base.vector-store.url=http://127.0.0.1:22333 \
   --knowledge-base.vector-store.collection=api-knowledge-base \
-  >/tmp/ascend-agent.log 2>&1 < /dev/null &
+  >"$ASCEND_AGENT_HOME/logs/ascend-agent.log" 2>&1 < /dev/null &
+echo $! >"$ASCEND_AGENT_HOME/pids/ascend-agent.pid"
 ```
 
 Health check:
@@ -98,6 +117,26 @@ curl -i http://127.0.0.1:8080/actuator/health
 ```
 
 Expected: `HTTP/1.1 200` with `{"status":"UP",...}`.
+
+## Directory Contract
+
+The approved long-lived local directory contract is rooted at `ASCEND_AGENT_HOME=./.ascend_agent/`.
+
+Default layout:
+
+- `tools/chroma-venv-0520`: Chroma CLI and Python virtualenv
+- `chroma`: Chroma persistent data directory
+- `db`: service-owned local database files such as `api_metadata.db`
+- `logs`: Chroma and Spring Boot log files
+- `pids`: background process pid files
+
+Override strategy:
+
+1. `-Dascend.agent.data-dir=...` has the highest priority for service-owned local database files.
+2. `-Dascend.agent.home=...` or `ASCEND_AGENT_HOME=...` defines the approved contract root used to derive runtime paths in wrapper invocations and documentation.
+3. If you need to force current scripts onto the contract today, export `CHROMA_VENV_DIR`, `CHROMA_DATA_DIR`, `CHROMA_LOG_FILE`, and `CHROMA_PID_FILE` explicitly from `ASCEND_AGENT_HOME`.
+
+The repository should no longer be documented as defaulting to `/tmp` for long-lived local state. If a script still has an internal `/tmp` fallback, treat it as compatibility-only and override it explicitly.
 
 ## Minimal Verification Chain
 
@@ -133,8 +172,9 @@ CI intentionally does not provision Chroma or boot the full application. It is a
 
 - Chroma is not provisioned inside CI. Local persistence validation still requires a running Chroma instance.
 - Local runtime should use Chroma `0.5.20` on `22333`. Do not mix this README baseline with ad hoc `1.5.x` commands.
+- The repository does not currently provide a single end-to-end bootstrap script for both Chroma and the Spring Boot service. Use the documented Chroma scripts plus explicit JVM parameters.
 - The project contains additional local-only files and environment-specific workflows not covered by this README.
-- For local service startup, pass the vector store URL explicitly if your local config still points somewhere else.
+- For local service startup, pass the vector store URL and data directory explicitly if your local config still points somewhere else.
 
 ## File Map
 
