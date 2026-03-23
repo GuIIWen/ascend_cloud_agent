@@ -1,7 +1,7 @@
 # 系统架构图
 
 > 文档定位：本文件描述“目标架构（P10规格）”，用于对齐方向与模块边界；不等价于当前已实现能力。  
-> 当前实现基线与后续治理决议以 [meeting.md](/root/ascend_agent/meeting.md) 中 `2026-03-20 16:00:13 +0800` 记录为准。
+> 运行与配置基线以 [CONFIG_GUIDE.md](/root/ascend_agent/docs/CONFIG_GUIDE.md) 为准；本文件仅负责说明架构目标与当前实现状态。
 
 ## 0. 当前实现状态与后续治理（截至 2026-03-20）
 
@@ -19,7 +19,8 @@
 |---|---|---|---|
 | KnowledgeBaseService v1 | 索引/检索基础设施 | Partial | 构建基线冲突、索引生命周期/幂等性与元数据 round-trip 不成立 |
 | 知识库 v2（TestScenario/Builder/Retriever/Service） | 场景化检索 | Partial | YAML 加载器卡死风险；默认检索装配不稳定；索引更新与检索实体回源不闭环 |
-| Spring Boot 接入层（Config/Controller） | 运行外壳/对外 API | Partial | 已出现但未形成可验证的依赖装配与运行时治理；当前仓库存在编译阻塞 |
+| Spring Boot 接入层（Config/Controller） | 运行外壳/对外 API | Partial | 已具备预构建 JAR 运行外壳；服务可在 `8080` 暴露 `/actuator/health`，但不代表业务主链路已闭环 |
+| Chroma 开发态向量存储 | 向量检索基础设施 | Implemented | Sprint-1 基线锁定为 Chroma `0.5.20`，脚本入口为 `scripts/install_chroma_0520.sh` / `scripts/start_chroma_22333.sh`，默认地址 `127.0.0.1:22333` |
 | UseCaseOptimizer | 用例优化层 | Draft | 仅有文档与架构占位，当前仓库未实现 |
 | ApiTestGenerator / CodeValidator 等 | 代码生成层 | Draft | 仅有文档与架构占位，当前仓库未实现 |
 | 零交互引擎 / 主 Agent | 应用层主入口 | Draft | 仅有文档与架构占位，当前仓库未实现 |
@@ -28,11 +29,12 @@
 
 当前基线结论：
 - 本仓库当前主要是“知识库原型 + v2 骨架”，尚未形成架构图中的端到端零交互闭环。
-- 构建基线存在冲突且已出现编译阻塞，任何“可运行/可交付”的表述以修复基线后复核为准。
+- 当前运行口径已收口为：Java 17 编译目标、JDK 21 运行时、应用默认 `8080`、Chroma 开发态默认 `127.0.0.1:22333`。
+- “服务能启动”只说明运行壳存在，不等价于图中所有模块都已实现。
 
 后续治理约定：
 - 任何新增能力必须先标注状态（Implemented/Partial/Stub/Draft），禁止把规划能力写成已完成。
-- 若图与实现发生漂移：优先更新 [meeting.md](/root/ascend_agent/meeting.md) 的评审记录与本节状态映射，再讨论是否扩展图中模块。
+- 若图与实现发生漂移：优先更新 [CONFIG_GUIDE.md](/root/ascend_agent/docs/CONFIG_GUIDE.md) 的运行基线与本节状态映射，再讨论是否扩展图中模块。
 
 ## 1. 整体架构（新版 - P10规格）
 

@@ -1,399 +1,208 @@
 # 配置指南
 
-## 模型API配置
+> 文档定位：本文件是当前运行与配置基线的单一事实来源。目标设计请参考其他设计文档；若与本文件冲突，以本文件为准。
 
-### 1. Embedding模型配置
+## 0. Sprint-1 当前有效基线
 
-在 `application.yml` 中配置Embedding模型的API地址：
+### 0.1 版本矩阵
+
+| 项目 | 当前基线 | 说明 |
+|------|----------|------|
+| Java 编译目标 | 17 | 见 `pom.xml` 中 `java.version` / `maven.compiler.*` |
+| Java 运行时 | JDK 21 | 当前运行口径统一为 JDK 21 |
+| Spring Boot | 2.7.18 | 见 `pom.xml` |
+| 开发态向量库 | Chroma 0.5.20 | 以仓库脚本入口为准 |
+| Chroma 地址 | `http://127.0.0.1:22333` | 已替换 `8000` 旧口径 |
+| 应用服务端口 | `8080` | 健康检查路径 `/actuator/health` |
+| Chroma 安装入口 | `scripts/install_chroma_0520.sh` | 创建独立 venv 并安装 `chromadb==0.5.20` |
+| Chroma 启动入口 | `scripts/start_chroma_22333.sh` | 默认监听 `127.0.0.1:22333` |
+| 应用配置模板 | `src/main/resources/application.yml.template` | 基线模板，不会自动生效 |
+| 应用运行入口 | `target/ascend-agent-1.0.0.jar` | 运行时建议显式设置 `JAVA_HOME`/`PATH` |
+
+### 0.2 配置优先级与生效入口
+
+当前仓库的配置优先级收口如下：
+
+1. 启动命令显式注入的环境变量
+2. 运行时实际加载的 `application.yml`
+3. `src/main/resources/application.yml.template` 中记录的默认基线
+4. 代码中的兜底默认值
+
+说明：
+- `application.yml.template` 是模板，不是自动生效文件。
+- Chroma 的安装/启动以脚本入口为准，不再以历史文档中的手敲命令为准。
+- 环境变量与配置文件冲突时，以环境变量为准。
+
+## 1. 应用配置结构
+
+### 1.1 当前基线模板
+
+当前模板与字段口径以 `src/main/resources/application.yml.template` 为准：
 
 ```yaml
-embedding:
-  api-url: ${EMBEDDING_API_URL:http://localhost:8080/v1/embeddings}
-  api-key: ${EMBEDDING_API_KEY:}
-  model: bge-large-zh-v1.5
-  dimension: 1024
+server:
+  port: ${SERVER_PORT:8080}
+
+knowledge-base:
+  vector-store:
+    type: chroma
+    url: http://127.0.0.1:22333
+    collection: api-knowledge-base
+
+  embedding:
+    provider: ${EMBEDDING_PROVIDER:local}
+    api-url: ${EMBEDDING_API_URL:http://localhost:8080/v1/embeddings}
+    api-key: ${EMBEDDING_API_KEY:}
+    model: ${EMBEDDING_MODEL:bge-large-zh-v1.5}
+    dimension: 1024
+    timeout-seconds: ${EMBEDDING_TIMEOUT_SECONDS:30}
+
+  rerank:
+    provider: ${RERANK_PROVIDER:none}
+    api-url: ${RERANK_API_URL:http://localhost:8080/v1/rerank}
+    api-key: ${RERANK_API_KEY:}
+    model: ${RERANK_MODEL:bge-reranker-large}
+    top-k: 5
+    timeout-seconds: ${RERANK_TIMEOUT_SECONDS:30}
+
+  llm:
+    provider: ${LLM_PROVIDER:none}
+    api-url: ${LLM_API_URL:http://localhost:8080/v1/chat/completions}
+    api-key: ${LLM_API_KEY:}
+    model: ${LLM_MODEL:qwen-coder-plus}
+    temperature: ${LLM_TEMPERATURE:0.2}
+    max-tokens: ${LLM_MAX_TOKENS:4096}
+    timeout-seconds: ${LLM_TIMEOUT_SECONDS:30}
 ```
 
-**环境变量设置：**
+### 1.2 模型配置说明
+
+| 配置项 | 说明 | 当前默认值 |
+|--------|------|------------|
+| `knowledge-base.embedding.api-url` | Embedding 服务地址 | `http://localhost:8080/v1/embeddings` |
+| `knowledge-base.embedding.model` | Embedding 模型名 | `bge-large-zh-v1.5` |
+| `knowledge-base.rerank.api-url` | Rerank 服务地址 | `http://localhost:8080/v1/rerank` |
+| `knowledge-base.rerank.model` | Rerank 模型名 | `bge-reranker-large` |
+| `knowledge-base.llm.api-url` | LLM Chat Completions 地址 | `http://localhost:8080/v1/chat/completions` |
+| `knowledge-base.llm.model` | LLM 模型名 | `qwen-coder-plus` |
+| `knowledge-base.vector-store.url` | 向量库地址 | `http://127.0.0.1:22333` |
+| `knowledge-base.vector-store.collection` | Chroma Collection | `api-knowledge-base` |
+
+### 1.3 环境变量示例
 
 ```bash
 export EMBEDDING_API_URL=https://your-embedding-api.com/v1/embeddings
-export EMBEDDING_API_KEY=your-api-key-here
-```
+export EMBEDDING_API_KEY=your-embedding-key
 
-### 2. Rerank模型配置
-
-```yaml
-rerank:
-  api-url: ${RERANK_API_URL:http://localhost:8080/v1/rerank}
-  api-key: ${RERANK_API_KEY:}
-  top-k: 5
-```
-
-**环境变量设置：**
-
-```bash
 export RERANK_API_URL=https://your-rerank-api.com/v1/rerank
-export RERANK_API_KEY=your-rerank-key-here
+export RERANK_API_KEY=your-rerank-key
+
+export LLM_API_URL=https://your-llm-api.com/v1/chat/completions
+export LLM_API_KEY=your-llm-key
 ```
 
-### 3. LLM模型配置
+## 2. 向量数据库配置
+
+### 2.1 开发环境基线
 
 ```yaml
-llm:
-  api-url: ${LLM_API_URL:http://localhost:8080/v1/chat/completions}
-  api-key: ${LLM_API_KEY:}
-  model: qwen-coder-plus
-  temperature: 0.2
-  max-tokens: 4096
+knowledge-base:
+  vector-store:
+    type: chroma
+    url: http://127.0.0.1:22333
+    collection: api-knowledge-base
 ```
 
-**配置说明：**
+### 2.2 生产环境目标
 
-| 配置项 | 说明 | 默认值 |
-|--------|------|--------|
-| api-url | LLM API地址 | http://localhost:8080/v1/chat/completions |
-| api-key | API密钥 | （空） |
-| model | 模型名称 | qwen-coder-plus |
-| temperature | 生成随机性（0-1） | 0.2 |
-| max-tokens | 最大生成token数 | 4096 |
+> 目标设计，非当前已验证实现。
 
-**环境变量设置：**
+```yaml
+knowledge-base:
+  vector-store:
+    type: milvus
+    url: http://milvus-host:19530
+    collection: api-knowledge-base
+```
+
+## 3. Chroma 本地安装与启动
+
+### 3.1 当前推荐路径
 
 ```bash
-export LLM_API_URL=https://your-llm-api.com/v1/chat/completions
-export LLM_API_KEY=your-llm-key-here
+scripts/install_chroma_0520.sh
+scripts/start_chroma_22333.sh
 ```
 
-**支持的模型列表：**
+默认参数：
+- venv：`/tmp/chroma-venv-0520`
+- 数据目录：`/tmp/chroma-data-22333`
+- 日志：`/tmp/chroma-22333.log`
+- PID：`/tmp/chroma-22333.pid`
+- 地址：`127.0.0.1:22333`
 
-| 模型 | 适用场景 | 说明 |
-|------|----------|------|
-| qwen-coder-plus | 代码生成（推荐） | 阿里通义编码专用模型 |
-| qwen-plus | 通用对话 | 通用能力强 |
-| qwen-max | 高质量生成 | 效果最佳，速度较慢 |
-| gpt-4 | 代码生成 | OpenAI模型 |
-| gpt-3.5-turbo | 快速测试 | 成本低，速度快 |
+### 3.2 验证命令
 
-### 4. 向量数据库配置
-
-**开发环境（Chroma）：**
-
-```yaml
-vector-store:
-  type: chroma
-  url: http://localhost:8000
-  collection: api-knowledge-base
+```bash
+curl http://127.0.0.1:22333/api/v1/heartbeat
 ```
 
-**生产环境（Milvus）：**
+## 4. Prompt 模板配置
 
-```yaml
-vector-store:
-  type: milvus
-  url: http://milvus-host:19530
-  collection: api-knowledge-base
-```
-
-## API接口规范
-
-### Embedding API
-
-**请求格式：**
-
-```json
-POST /v1/embeddings
-{
-  "input": ["文本内容"],
-  "model": "bge-large-zh-v1.5"
-}
-```
-
-**响应格式：**
-
-```json
-{
-  "data": [
-    {
-      "embedding": [0.1, 0.2, ...],
-      "index": 0
-    }
-  ]
-}
-```
-
-### Rerank API
-
-**请求格式：**
-
-```json
-POST /v1/rerank
-{
-  "query": "查询文本",
-  "documents": ["文档1", "文档2"],
-  "top_n": 5
-}
-```
-
-**响应格式：**
-
-```json
-{
-  "results": [
-    {
-      "index": 0,
-      "relevance_score": 0.95
-    }
-  ]
-}
-```
-
-### LLM API（Chat Completions）
-
-**请求格式：**
-
-```json
-POST /v1/chat/completions
-{
-  "model": "qwen-coder-plus",
-  "messages": [
-    {
-      "role": "system",
-      "content": "你是一个专业的Java测试工程师..."
-    },
-    {
-      "role": "user", 
-      "content": "为以下方法生成单元测试：\npublic int add(int a, int b) {\n    return a + b;\n}"
-    }
-  ],
-  "temperature": 0.2,
-  "max_tokens": 4096
-}
-```
-
-**响应格式：**
-
-```json
-{
-  "id": "chatcmpl-xxx",
-  "choices": [
-    {
-      "message": {
-        "role": "assistant",
-        "content": "生成的测试代码..."
-      },
-      "finish_reason": "stop"
-    }
-  ],
-  "usage": {
-    "prompt_tokens": 100,
-    "completion_tokens": 200,
-    "total_tokens": 300
-  }
-}
-```
-
-**错误响应格式：**
-
-```json
-{
-  "error": {
-    "message": "Invalid API key",
-    "type": "authentication_error",
-    "code": 401
-  }
-}
-```
-
-## Prompt模板配置
-
-### 系统Prompt模板
-
-系统Prompt定义AI角色和行为规则，支持变量注入：
+> 目标设计能力，是否实际生效取决于运行时是否已接入对应配置消费逻辑。
 
 ```yaml
 prompt:
   system-template: |
     你是一个专业的Java单元测试工程师。
     擅长为各种Java方法生成高质量的JUnit测试用例。
-    
-    遵循以下原则：
-    - 使用JUnit 5框架
-    - 包含有意义的测试用例命名
-    - 覆盖正常路径和边界条件
-    - 添加必要的注释说明
-    
+
   user-template: |
     请为以下Java代码生成单元测试：
-    
-    ```java
     ${code}
-    ```
-    
-    要求：
-    - 测试类名：{ClassName}Test
-    - 测试方法使用@DisplayName注解
-    - 包含正向测试和边界测试
 ```
 
-**变量注入说明：**
+## 5. 模型切换指南
 
-| 变量 | 说明 | 示例 |
-|------|------|------|
-| `${code}` | 待测试的Java代码 | `public int add(int a, int b){...}` |
-| `${className}` | 类名 | `CalculatorService` |
-| `${methodName}` | 方法名 | `add` |
-| `${packageName}` | 包名 | `com.example.service` |
+1. 修改运行时 `application.yml` 或对应环境变量。
+2. 优先确认目标模型接口兼容 OpenAI 风格的请求结构。
+3. 启动后通过日志核对实际加载的模型与地址。
 
-### 自定义Prompt
-
-在 `application.yml` 中覆盖默认模板：
+示例：
 
 ```yaml
-prompt:
-  system-template: |
-    你是一个专业的Java测试工程师，专注于...
-  user-template: |
-    为以下代码生成测试：${code}
+knowledge-base:
+  llm:
+    model: qwen-plus
+    temperature: 0.3
+    max-tokens: 2048
 ```
 
-## 模型切换指南
+## 6. 启动应用
 
-### 切换步骤
-
-1. **修改模型配置**
-   
-   编辑 `application.yml`：
-   ```yaml
-   llm:
-     model: qwen-plus  # 切换为通用模型
-   ```
-
-2. **调整生成参数**
-   
-   不同模型建议使用不同参数：
-   
-   | 模型 | temperature | max-tokens | 说明 |
-   |------|-------------|-------------|------|
-   | qwen-coder-plus | 0.2 | 4096 | 代码生成专用 |
-   | qwen-plus | 0.3 | 2048 | 通用对话 |
-   | qwen-max | 0.5 | 4096 | 高质量生成 |
-   | gpt-4 | 0.2 | 4096 | OpenAI代码 |
-
-3. **验证配置**
-   
-   启动应用后查看日志：
-   ```bash
-   java -jar ascend-agent.jar 2>&1 | grep -i "llm"
-   ```
-
-### 注意事项
-
-1. **API兼容性**
-   - 确保API支持 OpenAI Chat Completions 格式
-   - 不同提供商的API端点可能不同
-
-2. **模型特性**
-   - 代码专用模型（qwen-coder-plus）在代码生成任务上效果更好
-   - 通用模型适合需要创意的场景
-
-3. **成本控制**
-   - 设置合理的 `max-tokens` 避免过量消耗
-   - 高并发场景建议使用支持batch的模型
-
-4. **错误处理**
-   - 实现重试机制处理临时性API错误
-   - 记录完整的错误响应便于排查
-
-## 实际操作示例
-
-### 完整配置示例
-
-```yaml
-# application.yml
-embedding:
-  api-url: ${EMBEDDING_API_URL:http://localhost:8080/v1/embeddings}
-  api-key: ${EMBEDDING_API_KEY:}
-  model: bge-large-zh-v1.5
-  dimension: 1024
-
-rerank:
-  api-url: ${RERANK_API_URL:http://localhost:8080/v1/rerank}
-  api-key: ${RERANK_API_KEY:}
-  top-k: 5
-
-llm:
-  api-url: ${LLM_API_URL:http://localhost:8080/v1/chat/completions}
-  api-key: ${LLM_API_KEY:}
-  model: qwen-coder-plus
-  temperature: 0.2
-  max-tokens: 4096
-
-vector-store:
-  type: chroma
-  url: http://localhost:8000
-  collection: api-knowledge-base
-```
-
-### 环境变量配置脚本
-
-创建 `set-env.sh` 脚本：
+当前已收口运行口径：
+- 编译目标：Java 17
+- 运行时：JDK 21
+- 服务端口：`8080`
+- 健康检查：`/actuator/health`
 
 ```bash
-#!/bin/bash
-# Embedding配置
-export EMBEDDING_API_URL=https://api.example.com/v1/embeddings
-export EMBEDDING_API_KEY=your-embedding-key
+export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+export PATH=$JAVA_HOME/bin:$PATH
 
-# Rerank配置
-export RERANK_API_URL=https://api.example.com/v1/rerank
-export RERANK_API_KEY=your-rerank-key
-
-# LLM配置
-export LLM_API_URL=https://api.example.com/v1/chat/completions
-export LLM_API_KEY=your-llm-key
-
-# 启动应用
-java -jar ascend-agent.jar
-```
-
-### 验证配置
-
-```bash
-# 1. 检查环境变量
-echo $LLM_API_URL
-echo $LLM_API_KEY
-
-# 2. 启动并观察日志
-java -jar ascend-agent.jar
-
-# 3. 查看LLM服务是否正常初始化
-grep -i "LLM service initialized" logs/app.log
-```
-
-### 常见问题排查
-
-| 问题 | 原因 | 解决方案 |
-|------|------|----------|
-| API连接超时 | URL错误或网络不通 | 检查 `llm.api-url` 配置 |
-| 401认证错误 | API Key无效 | 确认 `llm.api-key` 正确 |
-| 生成内容为空 | temperature过高 | 降低 `temperature` 至0.1-0.3 |
-| Token溢出 | max-tokens过小 | 增大 `max-tokens` 或精简prompt |
-| 模型不支持 | 使用了未知模型 | 参考支持的模型列表 |
-
-## 配置优先级
-
-1. 环境变量（最高优先级）
-2. application.yml中的默认值
-3. 代码中的硬编码值（最低优先级）
-
-## 启动应用
-
-```bash
-# 设置环境变量后启动
 export EMBEDDING_API_URL=https://your-api.com/v1/embeddings
 export EMBEDDING_API_KEY=your-key
 export LLM_API_URL=https://your-llm-api.com/v1/chat/completions
 export LLM_API_KEY=your-llm-key
-java -jar ascend-agent.jar
+
+java -jar target/ascend-agent-1.0.0.jar
 ```
+
+## 7. 常见问题
+
+| 问题 | 现象 | 处理建议 |
+|------|------|----------|
+| Chroma 连不上 | 请求仍指向 `8000` | 检查是否还有旧配置覆盖 `knowledge-base.vector-store.url` |
+| 配置不生效 | 修改了模板但运行结果未变 | 确认修改的是运行时 `application.yml`，不是仅修改模板 |
+| Java 启动失败 | `java -version` 不符合预期 | 显式设置 `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64` |
+| 模型调用异常 | 401/超时/空响应 | 优先检查对应 `*_API_URL` / `*_API_KEY` 环境变量 |

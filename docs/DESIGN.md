@@ -2,13 +2,14 @@
 
 > 文档状态：Draft（目标设计）。本文件描述“端到端测试生成”的目标形态，不代表当前仓库已具备全部能力。  
 > 当前实现主要集中在“知识库 v1/v2 基础设施原型与 Spring 接入骨架”，端到端主链路（Agent/用例优化/代码生成/写入测试文件）尚未在 `src/main/java` 中落地。  
-> 实现基线与偏差以 [meeting.md](/root/ascend_agent/meeting.md) 中 `2026-03-20 16:00:13 +0800` 评审结论为准。
+> 运行与配置基线以 [CONFIG_GUIDE.md](/root/ascend_agent/docs/CONFIG_GUIDE.md) 为准。
 
 ## 0. 当前基线/后续治理（截至 2026-03-20）
 
 当前基线：
 - 本文件中的“用户确认候选 API”属于交互式流程描述；而 [ARCHITECTURE.md](/root/ascend_agent/docs/ARCHITECTURE.md) 的目标叙事是“零交互”。两者不应同时被解读为“已实现”，需在实现前先统一产品形态与链路取舍。
-- 当前仓库存在构建基线冲突与编译阻塞，文中任何“可运行/可写入文件”的步骤仅作为目标设计，不作为已验证结论。
+- 当前已收口的运行基线仅包括：Java 17 编译目标、JDK 21 运行时、Spring Boot 服务默认 `8080`、Chroma 开发态地址 `127.0.0.1:22333`。
+- 文中任何“可运行/可写入文件”的步骤仍主要属于目标设计，不应被解读为当前仓库已完成闭环。
 
 后续治理：
 - 本文作为“目标设计”，每次主链路能力落地时，必须补充一段“已实现范围/未实现范围”的更新记录，避免长期漂移。
@@ -29,6 +30,9 @@
 ## 2. 系统架构
 
 ### 2.1 整体流程
+
+> 以下为目标流程，不代表当前仓库已经实现“意图理解 -> 候选确认 -> 代码生成 -> 写入测试文件”的全链路。
+
 ```
 用户输入
   ↓
@@ -84,7 +88,7 @@ LLM生成测试代码
 
 **流程**：
 1. 用户输入向量化（Embedding）
-2. 向量数据库检索（FAISS/Milvus）
+2. 向量数据库检索（当前开发基线为 Chroma，生产目标为 Milvus）
 3. 召回Top 20-50候选
 4. Rerank模型重排序
 5. 返回Top 5结果
@@ -135,6 +139,9 @@ LLM生成测试代码
 ## 3. 数据流设计
 
 ### 3.1 索引构建阶段（离线）
+
+> 以下数据流是目标设计示意；当前仓库只具备部分知识库基础设施原型。
+
 ```
 Java源码文件
   ↓ [JavaParser解析]
@@ -144,7 +151,7 @@ API元数据（类、方法、签名、Javadoc）
   ↓ [Embedding服务]
 向量 [0.123, 0.456, ..., 0.789]
   ↓ [存储]
-向量数据库（FAISS索引）
+向量数据库（开发基线为 Chroma，生产目标为 Milvus）
 ```
 
 ### 3.2 查询匹配阶段（在线）
@@ -191,9 +198,9 @@ src/test/java/com/example/UserServiceTest.java
 
 ### 4.2 向量数据库选型
 
-**FAISS（推荐用于MVP）**：
-- 优点：轻量、本地部署、速度快
-- 缺点：功能相对简单
+**Chroma（当前开发基线）**：
+- 优点：本地安装路径简单，脚本已锁定 `0.5.20` / `22333`
+- 缺点：更适合单机开发与联调，不作为生产态能力承诺
 
 **Milvus（推荐用于生产）**：
 - 优点：功能强大、支持分布式、易扩展
@@ -219,39 +226,41 @@ UserService类的login方法：用户登录认证功能。
 
 ## 5. 配置设计
 
-### 5.1 配置文件结构（config.yaml）
+### 5.1 配置文件结构（application.yml）
+
+> 当前仓库提供 `src/main/resources/application.yml.template` 作为基线模板；下述示例按当前字段结构收口。
+
 ```yaml
-embedding:
-  api_url: "https://api.example.com/v1/embeddings"
-  api_key: "${EMBEDDING_API_KEY}"
-  model_name: "bge-large-zh-v1.5"
-  dimension: 1024
+knowledge-base:
+  embedding:
+    api-url: "${EMBEDDING_API_URL}"
+    api-key: "${EMBEDDING_API_KEY}"
+    model: "bge-large-zh-v1.5"
+    dimension: 1024
 
-rerank:
-  api_url: "https://api.example.com/v1/rerank"
-  api_key: "${RERANK_API_KEY}"
-  model_name: "bge-reranker-v2-m3"
-  top_k: 5
+  rerank:
+    api-url: "${RERANK_API_URL}"
+    api-key: "${RERANK_API_KEY}"
+    model: "bge-reranker-large"
+    top-k: 5
 
-llm:
-  api_url: "https://api.example.com/v1/chat/completions"
-  api_key: "${LLM_API_KEY}"
-  model_name: "qwen-coder-plus"
-  temperature: 0.2
-  max_tokens: 4096
+  llm:
+    api-url: "${LLM_API_URL}"
+    api-key: "${LLM_API_KEY}"
+    model: "qwen-coder-plus"
+    temperature: 0.2
+    max-tokens: 4096
 
-vector_db:
-  type: "faiss"
-  index_path: "./data/api_index"
-
-project:
-  source_path: "./src/main/java"
-  test_path: "./src/test/java"
+  vector-store:
+    type: "chroma"
+    url: "http://127.0.0.1:22333"
+    collection: "api-knowledge-base"
 ```
 
 ### 5.2 环境变量支持
 - 支持`${VAR_NAME}`语法引用环境变量
 - 敏感信息（API Key）不写入配置文件
+- 运行时建议显式设置 `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64`
 
 ## 6. 接口设计
 

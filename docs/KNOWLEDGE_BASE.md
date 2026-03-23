@@ -1,7 +1,7 @@
 # 知识库模块设计文档
 
 > 文档状态：Partial（设计为主，含部分实现）。本文件同时包含目标方案与实现设想，其中部分能力在当前仓库仍处于 Stub/Draft 状态。  
-> 当前实现基线与已知偏差以 [meeting.md](/root/ascend_agent/meeting.md) 中 `2026-03-20 16:00:13 +0800` 评审结论为准。
+> 运行与配置口径以 [CONFIG_GUIDE.md](/root/ascend_agent/docs/CONFIG_GUIDE.md) 为准；本文件重点说明知识库能力边界。
 
 ## 0. 当前实现状态与后续治理（截至 2026-03-20）
 
@@ -23,6 +23,7 @@
 
 当前基线结论：
 - 本仓库以“知识库基础设施原型”为主，当前编译/测试基线未稳定，本文中的性能指标与端到端指标未被仓库自证。
+- 当前开发态向量存储基线已收口为 Chroma `0.5.20`，默认地址 `127.0.0.1:22333`，安装/启动入口分别为 `scripts/install_chroma_0520.sh` 和 `scripts/start_chroma_22333.sh`。
 - 本文后续所有“实现代码示例”均视作示意，不应被解读为当前实现的真实等价物。
 
 后续治理约定：
@@ -56,7 +57,7 @@
 - 开箱即用的RAG能力
 
 **向量数据库**：
-- 开发阶段：Chroma（轻量、易部署）
+- 开发阶段：Chroma 0.5.20（轻量、易部署，当前脚本基线）
 - 生产环境：Milvus（高性能、企业级）
 
 **文档解析**：
@@ -353,7 +354,7 @@ public class WebDocumentCrawler {
 
 ### 6.2 推荐方案
 
-- **开发/测试**：Chroma（Docker一键启动）
+- **开发/测试**：Chroma 0.5.20（本地脚本启动）
 - **生产环境**：Milvus（高性能、企业级）
 
 **切换成本**：只需修改配置，无需改代码
@@ -361,8 +362,15 @@ public class WebDocumentCrawler {
 ### 6.3 Chroma启动
 
 ```bash
-docker run -p 8000:8000 chromadb/chroma
+scripts/install_chroma_0520.sh
+scripts/start_chroma_22333.sh
 ```
+
+默认参数：
+- 地址：`127.0.0.1:22333`
+- 数据目录：`/tmp/chroma-data-22333`
+- 日志：`/tmp/chroma-22333.log`
+- PID：`/tmp/chroma-22333.pid`
 
 ### 6.4 Milvus启动
 
@@ -381,7 +389,7 @@ knowledge-base:
   # 向量存储配置
   vector-store:
     type: chroma  # chroma 或 milvus
-    url: http://localhost:8000
+    url: http://127.0.0.1:22333
     collection: api-knowledge-base
   
   # 嵌入模型配置
@@ -440,9 +448,10 @@ export RERANK_API_KEY=your-key
 
 ### 8.1 环境准备（1小时）
 
-1. 安装Docker
-2. 启动Chroma：`docker run -p 8000:8000 chromadb/chroma`
-3. 配置Maven依赖
+1. 准备本地 Python / venv 环境
+2. 安装 Chroma：`scripts/install_chroma_0520.sh`
+3. 启动 Chroma：`scripts/start_chroma_22333.sh`
+4. 配置 Maven 依赖
 
 ### 8.2 核心开发（1-2天）
 
