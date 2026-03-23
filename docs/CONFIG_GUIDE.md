@@ -1,6 +1,6 @@
 # 配置指南
 
-> 文档定位：本文件是当前运行与配置基线的单一事实来源。目标设计请参考其他设计文档；若与本文件冲突，以本文件为准。
+> 文档定位：本文件收口“当前已验证基线”与“已批准的目标口径”。目标设计请参考其他设计文档；若与本文件冲突，以本文件为准。
 
 ## 0. Sprint-1 当前有效基线
 
@@ -8,11 +8,12 @@
 
 | 项目 | 当前基线 | 说明 |
 |------|----------|------|
-| Java 编译目标 | 17 | 见 `pom.xml` 中 `java.version` / `maven.compiler.*` |
-| Java 运行时 | JDK 21 | 当前运行口径统一为 JDK 21 |
+| Java 编译目标（目标口径） | 17 | Sprint-1 目标口径；“是否已对齐”以实际构建/CI 结果为准 |
+| Java 编译目标（当前仓库配置） | 1.8 | 见 `pom.xml` 中 `maven.compiler.source` / `maven.compiler.target`；待升级对齐到 17 |
+| Java 运行时（已验证口径） | JDK 21 | 当前运行口径统一为 JDK 21 |
 | Spring Boot | 2.7.18 | 见 `pom.xml` |
 | 开发态向量库 | Chroma 0.5.20 | 以仓库脚本入口为准 |
-| Chroma 地址 | `http://127.0.0.1:22333` | 已替换 `8000` 旧口径 |
+| Chroma 地址 | `http://127.0.0.1:22333` | 已替换历史旧端口口径 |
 | 应用服务端口 | `8080` | 健康检查路径 `/actuator/health` |
 | Chroma 安装入口 | `scripts/install_chroma_0520.sh` | 创建独立 venv 并安装 `chromadb==0.5.20` |
 | Chroma 启动入口 | `scripts/start_chroma_22333.sh` | 默认监听 `127.0.0.1:22333` |
@@ -24,7 +25,7 @@
 当前仓库的配置优先级收口如下：
 
 1. 启动命令显式注入的环境变量
-2. 运行时实际加载的 `application.yml`
+2. 运行时实际加载的 `application.yml`（由 Spring Boot 默认规则加载，或显式指定）
 3. `src/main/resources/application.yml.template` 中记录的默认基线
 4. 代码中的兜底默认值
 
@@ -32,6 +33,7 @@
 - `application.yml.template` 是模板，不是自动生效文件。
 - Chroma 的安装/启动以脚本入口为准，不再以历史文档中的手敲命令为准。
 - 环境变量与配置文件冲突时，以环境变量为准。
+- 若需要明确指定配置文件路径，使用 Spring Boot 原生参数：`--spring.config.location=/abs/path/application.yml`（不属于仓库自研能力，仅为运行方式建议）。
 
 ## 1. 应用配置结构
 
@@ -202,7 +204,7 @@ java -jar target/ascend-agent-1.0.0.jar
 
 | 问题 | 现象 | 处理建议 |
 |------|------|----------|
-| Chroma 连不上 | 请求仍指向 `8000` | 检查是否还有旧配置覆盖 `knowledge-base.vector-store.url` |
+| Chroma 连不上 | 请求仍指向历史旧端口 | 检查是否还有旧配置覆盖 `knowledge-base.vector-store.url` |
 | 配置不生效 | 修改了模板但运行结果未变 | 确认修改的是运行时 `application.yml`，不是仅修改模板 |
 | Java 启动失败 | `java -version` 不符合预期 | 显式设置 `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64` |
 | 模型调用异常 | 401/超时/空响应 | 优先检查对应 `*_API_URL` / `*_API_KEY` 环境变量 |
