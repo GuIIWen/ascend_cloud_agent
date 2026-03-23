@@ -67,11 +67,13 @@ curl -i http://127.0.0.1:22333/api/v1/heartbeat
 
 Expected: `HTTP/1.1 200 OK`.
 
-### 4. Build the service
+### 4. Build the runnable jar
 
 ```bash
-timeout 120 mvn -q -DskipTests compile
+timeout 180 mvn -q -DskipTests package
 ```
+
+This produces `target/ascend-agent-1.0.0.jar` for the next step.
 
 ### 5. Start the service
 
