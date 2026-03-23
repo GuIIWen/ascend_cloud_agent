@@ -1,5 +1,6 @@
 # Application config with sensitive data
 src/main/resources/application.yml
+/.ascend_agent/
 
 # Build artifacts
 target/

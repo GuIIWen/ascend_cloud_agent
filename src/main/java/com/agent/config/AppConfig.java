@@ -38,12 +38,15 @@ import java.nio.file.Paths;
 @EnableConfigurationProperties(KnowledgeBaseConfig.class)
 public class AppConfig {
 
+    static final String DATA_DIR_PROPERTY = "ascend.agent.data-dir";
+    static final String HOME_PROPERTY = "ascend.agent.home";
+    static final String HOME_ENV = "ASCEND_AGENT_HOME";
+    static final String DEFAULT_HOME_DIR = ".ascend_agent";
+    static final String DEFAULT_DB_DIR = "db";
+
     @Bean
     public MetadataStore metadataStore() {
-        String dataDir = System.getProperty(
-                "ascend.agent.data-dir",
-                Paths.get(System.getProperty("user.dir"), "data").toString());
-        Path dataPath = Paths.get(dataDir);
+        Path dataPath = resolveDataDir();
         try {
             Files.createDirectories(dataPath);
         } catch (IOException e) {
@@ -51,6 +54,31 @@ public class AppConfig {
         }
 
         return new MetadataStore(dataPath.resolve("api_metadata.db").toString());
+    }
+
+    Path resolveDataDir() {
+        return resolveDataDir(
+                System.getProperty(DATA_DIR_PROPERTY),
+                System.getProperty(HOME_PROPERTY),
+                System.getenv(HOME_ENV),
+                System.getProperty("user.dir"));
+    }
+
+    Path resolveDataDir(String explicitDataDir, String configuredHome, String envHome, String userDir) {
+        if (isBlank(explicitDataDir)) {
+            return resolveAgentHome(configuredHome, envHome, userDir).resolve(DEFAULT_DB_DIR).normalize();
+        }
+        return Paths.get(explicitDataDir.trim()).normalize();
+    }
+
+    Path resolveAgentHome(String configuredHome, String envHome, String userDir) {
+        if (!isBlank(configuredHome)) {
+            return Paths.get(configuredHome.trim()).normalize();
+        }
+        if (!isBlank(envHome)) {
+            return Paths.get(envHome.trim()).normalize();
+        }
+        return Paths.get(userDir).resolve(DEFAULT_HOME_DIR).normalize();
     }
 
     @Bean
@@ -80,10 +108,14 @@ public class AppConfig {
     }
 
     private String requireValue(String value, String name) {
-        if (value == null || value.trim().isEmpty()) {
+        if (isBlank(value)) {
             throw new IllegalStateException(name + " must not be blank");
         }
         return value.trim();
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 
     @Bean

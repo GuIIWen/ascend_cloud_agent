@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VENV_DIR="${CHROMA_VENV_DIR:-/tmp/chroma-venv-0520}"
-DATA_DIR="${CHROMA_DATA_DIR:-/tmp/chroma-data-22333}"
-LOG_FILE="${CHROMA_LOG_FILE:-/tmp/chroma-22333.log}"
-PID_FILE="${CHROMA_PID_FILE:-/tmp/chroma-22333.pid}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+AGENT_HOME="${ASCEND_AGENT_HOME:-$REPO_ROOT/.ascend_agent}"
+VENV_DIR="${CHROMA_VENV_DIR:-$AGENT_HOME/tools/chroma-venv-0520}"
+DATA_DIR="${CHROMA_DATA_DIR:-$AGENT_HOME/chroma}"
+LOG_DIR="${CHROMA_LOG_DIR:-$AGENT_HOME/logs}"
+PID_DIR="${CHROMA_PID_DIR:-$AGENT_HOME/pids}"
+LOG_FILE="${CHROMA_LOG_FILE:-$LOG_DIR/chroma-22333.log}"
+PID_FILE="${CHROMA_PID_FILE:-$PID_DIR/chroma-22333.pid}"
 HOST="${CHROMA_HOST:-127.0.0.1}"
 PORT="${CHROMA_PORT:-22333}"
 CHROMA_BIN="$VENV_DIR/bin/chroma"
@@ -21,12 +26,11 @@ if command -v lsof >/dev/null 2>&1 && lsof -i :"$PORT" -P -n >/dev/null 2>&1; th
   exit 1
 fi
 
-mkdir -p "$DATA_DIR"
+mkdir -p "$DATA_DIR" "$LOG_DIR" "$PID_DIR"
 
 setsid nohup "$CHROMA_BIN" run --host "$HOST" --port "$PORT" --path "$DATA_DIR" \
   >"$LOG_FILE" 2>&1 < /dev/null &
 PID=$!
-echo "$PID" >"$PID_FILE"
 
 sleep 2
 
@@ -36,7 +40,18 @@ if ! kill -0 "$PID" 2>/dev/null; then
   exit 1
 fi
 
-echo "chroma pid: $PID"
+REAL_PID="$PID"
+if command -v lsof >/dev/null 2>&1; then
+  LISTEN_PID="$(lsof -ti TCP:"$PORT" -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
+  if [[ -n "$LISTEN_PID" ]]; then
+    REAL_PID="$LISTEN_PID"
+  fi
+fi
+
+echo "$REAL_PID" >"$PID_FILE"
+
+echo "agent home: $AGENT_HOME"
+echo "chroma pid: $REAL_PID"
 echo "data dir: $DATA_DIR"
 echo "log file: $LOG_FILE"
 echo "pid file: $PID_FILE"
