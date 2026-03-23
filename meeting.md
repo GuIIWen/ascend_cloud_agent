@@ -6,6 +6,49 @@
 - 建议把最新记录放在文件最上方，便于事后快速查看。
 - 记录至少包含：时间、主题、范围、统一结论、问题分级、行动项、关键证据。
 
+## 2026-03-23 11:40:47 +0800
+
+### 主题
+本地 Chroma 0.5.20 安装脚本、启动脚本固化与仓库交付
+
+### 参与角色
+- P8：脚本落地、环境验证、提交
+- 主线程：验收与后续 push
+
+### 评审范围
+- `scripts/install_chroma_0520.sh`
+- `scripts/start_chroma_22333.sh`
+- `meeting.md`
+
+### 统一结论
+- 本地 Chroma 不再依赖手工命令，已沉淀为仓库脚本。
+- 安装脚本固定使用独立 venv，并显式锁定 `chromadb==0.5.20`。
+- 启动脚本固定以 `127.0.0.1:22333` 启动本地 Chroma，并校验端口占用、输出 PID/日志/健康检查提示。
+- 本次交付不改业务代码，不改用户本地密钥配置。
+
+### 核心问题
+
+#### P1
+- 之前本地可用的 Chroma 是手工安装的 `chromadb 1.5.5`，`/api/v1/heartbeat` 已弃用，和项目当前 v1 接口预期不兼容。
+- 仓库缺少可复用脚本，环境重建依赖临场命令，重复成本高且容易漂移。
+
+### 决策
+- 统一使用独立虚拟环境 `/tmp/chroma-venv-0520` 安装 `chromadb==0.5.20`。
+- 统一使用本地持久化目录 `/tmp/chroma-data-22333`。
+- 启动脚本默认写日志到 `/tmp/chroma-22333.log`，写 PID 到 `/tmp/chroma-22333.pid`。
+
+### 行动项
+- P8：提交安装脚本、启动脚本和本次 meeting 记录。
+- 主线程：后续根据需要把项目默认 Chroma 端口从 `8000` 调整到 `22333` 并做统一验收。
+
+### 关键证据
+- `scripts/install_chroma_0520.sh`
+- `scripts/start_chroma_22333.sh`
+- `/tmp/chroma-venv-0520`
+- `/tmp/chroma-data-22333`
+- `/tmp/chroma-22333.log`
+- `/tmp/chroma-22333.pid`
+
 ## 2026-03-20 16:00:13 +0800
 
 ### 主题
@@ -181,6 +224,370 @@
 - 以后每次做架构评审、代码审查、技术决策或重大问题分析，主Agent必须更新本文件。
 - 更新时必须写入新的时间戳，并记录统一结论、问题分级、行动项和关键证据文件。
 
+## 2026-03-20 17:11:20 +0800
+
+### 主题
+模型配置模板核对与运行时生效路径确认
+
+### 参与角色
+- P10 主线程：结论确认与记录
+- P8：未介入修改
+- P9：未介入修改
+
+### 评审范围
+- `src/main/resources/application.yml.template`
+- `src/main/resources/application.yml`
+- `src/main/java/com/agent/config/AppConfig.java`
+- `.gitignore`
+
+### 统一结论
+- `application.yml.template` 是仓库当前版本原样文件，本轮未修改。
+- `application.yml` 是本地忽略文件，用于运行时本地配置，不参与 git 跟踪。
+- 当前代码并未把 `application.yml.template` 中的模型配置真正绑定到运行时 Bean，直接修改 template 不会让服务实际切换 embedding 模型。
+
+### 核心问题
+
+#### P1
+- `AppConfig` 中 `knowledgeBaseConfig()` 直接 `new KnowledgeBaseConfig()` 返回默认值，未从 Spring 配置加载。
+- `AppConfig` 中 `embeddingModel()` 固定返回 `AllMiniLmL6V2EmbeddingModel`，未读取 template 中的 `knowledge-base.embedding.*`。
+
+#### P2
+- `application.yml.template` 的配置样例与当前运行路径存在脱节，容易误导使用者以为改模板即可生效。
+
+### 决策
+- 短期结论：将 template 视为样例文件，不视为当前运行态真实配置入口。
+- 后续若要支持模型切换，应由 P8 将 YAML 配置绑定到 Spring Bean，并补最小回归验证后提交。
+
+### 行动项
+- 负责人：P10 向用户明确当前 template 状态与生效边界。
+- 负责人：P8 后续如接到需求，修正配置绑定并单独 commit。
+
+### 关键证据
+- `src/main/resources/application.yml.template`
+- `src/main/resources/application.yml`
+- `src/main/java/com/agent/config/AppConfig.java`
+- `.gitignore`
+
+## 2026-03-20 17:46:59 +0800
+
+### 主题
+模型配置链路闭环修复与 P10 验收
+
+### 参与角色
+- P10 主线程：拍板范围、替换低效 P9、最终验收与复盘
+- P9：两轮组织执行与提交
+- P8：模型配置链路实现、测试、提交
+
+### 评审范围
+- `src/main/java/com/agent/config/AppConfig.java`
+- `src/main/java/com/agent/config/KnowledgeBaseConfig.java`
+- `src/main/java/com/agent/service/impl/DisabledLLMService.java`
+- `src/main/java/com/agent/service/impl/HttpChatCompletionsLLMService.java`
+- `src/main/java/com/agent/service/impl/HttpEmbeddingModel.java`
+- `src/main/java/com/agent/service/impl/DisabledRerankService.java`
+- `src/main/java/com/agent/service/impl/HttpRerankService.java`
+- `src/main/resources/application.yml.template`
+- `src/test/java/com/agent/config/AppConfigModelSelectionTest.java`
+- `src/test/java/com/agent/config/KnowledgeBaseConfigBindingTest.java`
+- `src/test/java/com/agent/service/impl/HttpModelServiceTest.java`
+- `src/main/resources/application.yml`
+
+### 统一结论
+- 第一轮提交已打通 `embedding` 与 `llm` 的配置绑定、Bean 选择和最小 HTTP 实现，但遗漏了 `rerank` 运行时链路。
+- 第二轮提交补齐 `rerank` 后，`knowledge-base.embedding.*`、`knowledge-base.llm.*`、`knowledge-base.rerank.*` 三类模型配置均已打通到 Spring Bean 选择层。
+- 代码层闭环已完成并提交到 `master`，当前 `HEAD` 为 `a2f48c26537103f72ffa840d01e868686c162b16`。
+- 仍有一个本地环境级问题未纳入提交：忽略文件 `src/main/resources/application.yml` 为非 UTF-8 编码，直接用它启动会先在 YAML 解析阶段失败。
+
+### 核心问题
+
+#### P1
+- 第一轮执行未一次收口，`rerank` 虽有配置项但没有运行时实现与 Bean，P10 追加第二轮任务后才补齐。
+- 本地 `src/main/resources/application.yml` 编码异常，`java -jar target/ascend-agent-1.0.0.jar` 直接启动时报 `YAMLException -> MalformedInputException`，这会阻塞用户实际配置和启动。
+
+#### P2
+- `LLMService` 与 `RerankService` 目前已“可配置、可注入、可调用”，但仓库里的上层业务入口尚未全面消费它们，当前完成的是基础设施接线，不是完整业务能力交付。
+
+### 决策
+- 接受两次代码提交结果，作为“模型配置基础设施接通”的当前基线。
+- 不修改用户本地忽略配置文件中的真实密钥内容，编码问题由主线程在交付说明中单独提示。
+- 以后凡是“配了就通”类需求，验收必须覆盖：模板、配置绑定、Bean 选择、最小调用测试、提交，以及用户本地运行配置可用性检查。
+
+### 行动项
+- 负责人：P10 向用户明确两次提交结果、当前 `HEAD`、已打通范围和本地 `application.yml` 的编码阻塞。
+- 负责人：后续执行层若继续推进业务能力，要把 `LLMService` / `RerankService` 接到真实业务入口，不得只停留在基础设施层。
+
+### 关键证据
+- `75d997d3823c2223be0c1fb4716312c5b9f8464e`
+- `a2f48c26537103f72ffa840d01e868686c162b16`
+- `src/main/java/com/agent/config/AppConfig.java`
+- `src/main/resources/application.yml.template`
+- `src/main/resources/application.yml`
+
+## 2026-03-23 09:36:51 +0800
+
+### 主题
+`application.yml.template` 缺少端口等基础配置的根因核查
+
+### 参与角色
+- P10 主线程：核查历史、命名边界与交付口径
+- P8：未介入
+- P9：未介入
+
+### 评审范围
+- `src/main/resources/application.yml.template`
+- `src/main/resources/application.yml`
+- `git log -- src/main/resources/application.yml.template`
+
+### 统一结论
+- `application.yml.template` 缺少 `server.port`、`management`、`logging` 等基础配置，不是最近一次漏更新，而是这个文件从 2026-03-18 初版开始就只承载 `knowledge-base` 配置。
+- 2026-03-19 在提交 `afdf1df` 中，该文件被改名为 `application.yml.template`，但内容边界没有同步升级为“完整应用模板”，因此命名与内容职责不一致。
+- 当前真正包含端口等基础配置的是本地忽略文件 `src/main/resources/application.yml`，而不是仓库模板。
+
+### 核心问题
+
+#### P1
+- 模板命名误导。文件名叫 `application.yml.template`，但内容只覆盖 `knowledge-base`，会让使用者自然预期其中包含完整的应用启动参数。
+
+#### P2
+- 文档口径缺失。仓库内没有明确说明该 template 只是知识库配置片段，导致用户需要自行对照本地 `application.yml` 才能发现 `server.port` 等配置不在模板内。
+
+### 决策
+- 将此问题定义为“模板职责边界不清”，不是单纯字段漏配。
+- 后续若修复，应二选一：
+- 方案 A：把 `application.yml.template` 扩成完整应用模板，补齐 `server`、`spring.application`、`management`、`logging` 等基础段。
+- 方案 B：保留当前内容，但改名并补文档，明确它只是 `knowledge-base` 配置样例。
+
+### 行动项
+- 负责人：P10 先向用户明确这不是最近没更新，而是历史上一直如此。
+- 负责人：若用户确认要修，后续由执行层按 A/B 之一落地并提交。
+
+### 关键证据
+- `src/main/resources/application.yml.template`
+- `src/main/resources/application.yml`
+- `b80ef81`
+- `afdf1df`
+- `75d997d`
+
+## 2026-03-23 09:40:26 +0800
+
+### 主题
+完整化 `application.yml.template` 落地结果验收
+
+### 参与角色
+- P10 主线程：方案拍板、验收、记录
+- P9：组织执行与提交
+- P8：模板修改与提交
+
+### 评审范围
+- `src/main/resources/application.yml.template`
+- `0211614d2b160ac5b6d44b87d5154804b911537c`
+
+### 统一结论
+- 方案 A 已落地完成。
+- `application.yml.template` 已补齐完整应用基础段：`server`、`spring.application`、`management`、`logging`。
+- 新模板同时保留原有 `knowledge-base` 配置，已不再是“文件名像完整模板、内容却只是知识库片段”的状态。
+- 本次提交已落在 `master`，当前 `HEAD` 为 `0211614d2b160ac5b6d44b87d5154804b911537c`。
+
+### 核心问题
+
+#### P2
+- 本次未处理本地 `application.yml` 编码问题；该问题仍是用户本地运行态风险，但不属于本次模板完整化提交范围。
+
+### 决策
+- 接受提交 `0211614d2b160ac5b6d44b87d5154804b911537c` 作为模板职责修正基线。
+- 后续若继续增强模板，应基于完整模板演进，而不是再回退为局部片段。
+
+### 行动项
+- 负责人：P10 向用户确认模板已补齐，并说明当前剩余风险仅在本地忽略配置文件编码。
+- 负责人：后续执行层如再改配置模板，必须保持“文件名、内容职责、文档口径”一致。
+
+### 关键证据
+- `0211614d2b160ac5b6d44b87d5154804b911537c`
+- `src/main/resources/application.yml.template`
+
+## 2026-03-23 09:51:48 +0800
+
+### 主题
+按用户当前 embedding/rerank 配置重启服务并验活
+
+### 参与角色
+- P10 主线程：范围拍板、结果验收、记录
+- P9：组织执行与结果回传
+- P8：重启服务、构造临时运行配置、健康检查
+
+### 评审范围
+- `/tmp/ascend-agent-runtime.yml`
+- `/tmp/ascend-agent-runtime.log`
+- `src/main/resources/application.yml`
+- 运行中进程 `2168393`
+
+### 统一结论
+- 旧进程 `633561` 已停掉，避免误把旧配置当结果。
+- 因本地 `src/main/resources/application.yml` 仍为非 UTF-8，不能直接拿它启动。
+- 执行层基于用户当前本地配置提取出 `embedding/rerank` 实际值，生成一次性临时文件 `/tmp/ascend-agent-runtime.yml` 后成功启动了新进程。
+- 新进程 `2168393` 已监听 `8080`，`/actuator/health` 返回 `200 UP`。
+- 启动日志未显示 `embedding/rerank` 配置导致的启动期异常。
+
+### 核心问题
+
+#### P2
+- 当前验证证明“用户已配置的 embedding/rerank 不阻塞服务启动，并已被带入运行配置”，但不等于已经证明外部 API 在真实业务调用阶段一定可达。
+- 本地 `application.yml` 编码问题仍未修复，后续若不处理，直接按默认配置文件启动仍会失败。
+
+### 决策
+- 接受本次运行态验证结果：服务已按用户当前 `embedding/rerank` 配置启动成功。
+- 后续若要验证外部模型链路，应补一条真实触发 embedding/rerank 的请求级验证，而不是只看健康检查。
+
+### 行动项
+- 负责人：P10 向用户明确服务已启动成功、当前 PID、日志路径与边界条件。
+- 负责人：如用户继续要求外部模型链路验证，执行层补做请求级联调。
+
+### 关键证据
+- `/tmp/ascend-agent-runtime.yml`
+- `/tmp/ascend-agent-runtime.log`
+- `2168393`
+- `633561`
+
+## 2026-03-23 09:55:54 +0800
+
+### 主题
+抓取指定华为云 ModelArts API 页面并录入知识库
+
+### 参与角色
+- P10 主线程：范围拍板、结果验收、记录
+- P9：组织执行与验证
+- P8：接口调用、日志核验、检索验证
+
+### 评审范围
+- `https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html`
+- 本地服务 `http://127.0.0.1:8080`
+- 运行日志 `/tmp/ascend-agent-runtime.log`
+
+### 统一结论
+- 指定页面已经录入知识库，并可通过知识库搜索接口检索到。
+- 专用 `crawl/huawei-cloud` 解析链路未能把该页面识别为结构化 API，结果是 `0 APIs`。
+- 通用 `index` 网页入库链路成功，将该页面作为 1 个外部文档写入知识库，并切分为 `95 segments`。
+
+### 核心问题
+
+#### P1
+- 华为云专用解析器对该页面未生效。抓取接口调用成功，但解析结果为 `0 APIs`，说明“页面可抓”不等于“结构化 API 可抽取”。
+
+#### P2
+- 当前录入成功依赖通用网页入库兜底，因此检索面可用，但结构化 API 元数据抽取能力仍未覆盖该页面类型。
+
+### 决策
+- 接受本次“页面已录入知识库”的结果。
+- 不把本次结果表述为“华为云 API 结构化解析已打通”，避免误导。
+- 后续若用户要求更高质量的 API 知识库，应单独修华为云专用解析器。
+
+### 行动项
+- 负责人：P10 向用户明确当前是“网页正文入库成功”，不是“专用 API parser 解析成功”。
+- 负责人：如后续要提升结构化能力，执行层单独排查 `HuaweiCloudApiParser` 对该页面的抽取规则。
+
+### 关键证据
+- `POST /api/knowledge/crawl/huawei-cloud`
+- `POST /api/knowledge/index`
+- `POST /api/knowledge/search`
+- `https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html`
+
+## 2026-03-23 10:30:07 +0800
+
+### 主题
+修复华为云目录页下钻抓取与结构化 API 入库
+
+### 参与角色
+- P10 主线程：问题定性、验收门禁、记录
+- P9：组织执行、要求补测试与运行闭环
+- P8：实现 crawler/parser/service 修复、测试、提交、实测
+
+### 评审范围
+- `src/main/java/com/agent/crawler/WebDocumentCrawler.java`
+- `src/main/java/com/agent/parser/HuaweiCloudApiParser.java`
+- `src/main/java/com/agent/service/HuaweiCloudApiCrawlerService.java`
+- `src/test/java/com/agent/parser/HuaweiCloudApiParserTest.java`
+- `src/test/java/com/agent/service/HuaweiCloudApiCrawlerServiceTest.java`
+- 提交 `573d8bbd114c7795b33e102dc984f22346c0b9ea`
+- 运行日志 `/tmp/ascend-agent-runtime.log`
+
+### 统一结论
+- 专用华为云抓取链路已经从“只处理单页正文”修复为“目录页发现子详情页 -> 详情页结构化解析 -> API 入库”。
+- 针对 `https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html`，新链路可稳定发现 `257` 个子详情页，并完成 `257 APIs indexed, 0 errors`。
+- 检索 `ListWorkflows` 已命中结构化结果，`sourceLocation` 指向子详情页 `ListWorkflows.html`，说明不再只是目录页正文入库。
+- 修复已提交到 `master`，当前 `HEAD` 为 `573d8bbd114c7795b33e102dc984f22346c0b9ea`。
+
+### 核心问题
+
+#### P1
+- 原始根因一：`HuaweiCloudApiCrawlerService` 过去把网页正文文本当 HTML 交给 parser，导致 parser 实际拿不到 DOM。
+- 原始根因二：过去只处理当前页，没有目录页到详情页的一层下钻能力。
+
+#### P2
+- 重复抓取同一目录页会产生重复结构化结果，当前检索中已观察到 `ListWorkflows` 等结果重复出现，说明后续仍需做去重或幂等处理。
+- 当前目录页抓取是同步长耗时接口，请求一次约 `58s~172s`，后续若扩大范围需要考虑异步化或任务化。
+
+### 决策
+- 接受本次“目录页下钻结构化入库”修复结果。
+- 不把当前状态包装成完全收口：重复入库与同步长耗时仍是后续优化项。
+
+### 行动项
+- 负责人：P10 向用户确认该目录页的子 API 已结构化入库，并说明当前残余风险。
+- 负责人：后续执行层若继续演进知识库抓取能力，应补幂等去重与异步任务化。
+
+### 关键证据
+- `573d8bbd114c7795b33e102dc984f22346c0b9ea`
+- `/tmp/ascend-agent-runtime.log`
+- `https://support.huaweicloud.com/api-modelarts/ListWorkflows.html`
+- `POST /api/knowledge/crawl/huawei-cloud`
+- `POST /api/knowledge/search`
+
+## 2026-03-23 10:55:43 +0800
+
+### 主题
+设计文档与当前向量存储实现偏差核查
+
+### 参与角色
+- P10 主线程：设计对照、偏差定性、记录
+- P8：未介入
+- P9：未介入
+
+### 评审范围
+- `docs/ARCHITECTURE.md`
+- `docs/DESIGN.md`
+- `docs/KNOWLEDGE_BASE.md`
+- `src/main/java/com/agent/config/AppConfig.java`
+- `src/main/java/com/agent/config/KnowledgeBaseConfig.java`
+- `src/main/java/com/agent/service/KnowledgeBaseServiceImpl.java`
+
+### 统一结论
+- 设计文档不是按“向量只存在内存、服务重启即丢”来设计的。
+- 文档的目标架构明确是“向量数据库（Chroma/Milvus/FAISS 等） + 元数据库（SQLite）”的双存储分层。
+- 当前实现把 `EmbeddingStore` 硬编码成 `InMemoryEmbeddingStore`，而 `knowledge-base.vector-store.*` 配置没有真正接到运行时，属于实现偏离设计，不是设计本身如此。
+
+### 核心问题
+
+#### P1
+- `AppConfig` 当前直接返回内存向量存储，导致向量索引不具备重启后持久化能力。
+- `KnowledgeBaseConfig` 中已经有 `vector-store.type/url/collection`，但当前实现没有消费这组配置，形成“文档和配置都像支持、运行态其实没接上”的偏差。
+
+#### P2
+- 设计文档里向量库承担的是“语义检索层”，元数据库承担的是“结构化真值层”；当前实现只把真值层落到了 SQLite，向量层仍停留在演示态。
+
+### 决策
+- 将该问题定义为“实现偏离设计”，不是“文档设计如此”。
+- 后续如果要做稳定性收口，应优先把持久化向量库真正接入运行时，替换内存实现。
+
+### 行动项
+- 负责人：P10 向用户明确设计意图与当前实现偏差。
+- 负责人：后续执行层如继续改造知识库基础设施，应把 `vector-store` 配置接到 Chroma/Milvus/FAISS 等真实持久化实现，并补重启后可检索验证。
+
+### 关键证据
+- `docs/ARCHITECTURE.md`
+- `docs/DESIGN.md`
+- `docs/KNOWLEDGE_BASE.md`
+- `src/main/java/com/agent/config/AppConfig.java`
+- `src/main/java/com/agent/config/KnowledgeBaseConfig.java`
+
 ## Template
 
 ```md
@@ -222,3 +629,105 @@
 - 文件路径
 - 文件路径
 ```
+
+## 2026-03-23 11:20:49 +0800
+
+### 主题
+本地安装 Chroma 替代 Docker 拉镜像，并校准向量库默认端口配置
+
+### 参与角色
+- P10 主线程：决策安装路径，核对配置偏差，监督闭环验收
+- P8：执行本地安装、启动进程、验证 heartbeat、必要时提交配置修复
+- P9：未单独实例化，由主线程代行任务编排
+
+### 评审范围
+- `src/main/resources/application.yml.template`
+- `src/main/java/com/agent/config/KnowledgeBaseConfig.java`
+- `src/main/java/com/agent/config/AppConfig.java`
+- `src/test/java/com/agent/config/AppConfigVectorStoreSelectionTest.java`
+- `src/test/java/com/agent/config/KnowledgeBaseConfigBindingTest.java`
+
+### 统一结论
+- Docker 拉取 Chroma 受网络影响，不应继续阻塞主线，先采用本地直接安装方案。
+- 当前代码虽已开始接入 `ChromaEmbeddingStore`，但默认 URL 仍残留 `8000`，没有与用户指定端口 `22333` 对齐。
+- 如果只安装 Chroma 而不改默认端口/模板，服务仍可能连接错误地址，导致“基础设施已就绪、应用仍不可用”的假象。
+
+### 核心问题
+
+#### P1
+- `KnowledgeBaseConfig` 默认 `vector-store.url` 仍为 `http://localhost:8000`，与当前决策端口不一致。
+- `application.yml.template` 仍引导用户配置 `http://localhost:8000`，会把后续部署继续带偏。
+
+#### P2
+- 新增测试样例仍使用 `8000`，与目标运行口径不一致，后续容易让维护者误判真实期望端口。
+- P8 本轮安装任务如果不绑定“heartbeat + 端口 + 应用接入”三项验收，容易出现只验证进程存在、不验证可用性的假完成。
+
+### 决策
+- 先让 P8 走本地安装 Chroma 路径，不再卡 Docker。
+- 安装完成后必须用 `22333` 做 heartbeat 校验。
+- 如需仓库改动，P8 需把默认端口相关配置和测试一并修正，并单独 commit。
+
+### 行动项
+- 负责人：P8 执行本地安装并反馈启动、端口、heartbeat 结果。
+- 负责人：P8 如改仓库，统一把 `8000` 校准为 `22333`，提交独立 commit。
+- 负责人：P10 在 P8 返回后做结果复核，并决定是否继续推进持久化回归验证。
+
+### 关键证据
+- `src/main/resources/application.yml.template`
+- `src/main/java/com/agent/config/KnowledgeBaseConfig.java`
+- `src/main/java/com/agent/config/AppConfig.java`
+- `src/test/java/com/agent/config/AppConfigVectorStoreSelectionTest.java`
+- `src/test/java/com/agent/config/KnowledgeBaseConfigBindingTest.java`
+
+## 2026-03-23 11:36:22 +0800
+
+### 主题
+本地安装 Chroma、回退兼容版本并完成知识库服务重启后持久化验证
+
+### 参与角色
+- P10 主线程：做版本决策、收口配置、验收服务重启前后行为
+- P8：执行本地安装路径探索，确认非 Docker 可行
+- P9：未单独实例化，由主线程代行任务编排
+
+### 评审范围
+- `/tmp/chroma-venv`
+- `/tmp/chroma-venv-0520`
+- `/tmp/chroma-22333.log`
+- `/tmp/ascend-agent-runtime.yml`
+- `src/main/java/com/agent/config/AppConfig.java`
+- `src/main/java/com/agent/config/KnowledgeBaseConfig.java`
+- `src/main/resources/application.yml.template`
+- `src/test/java/com/agent/config/AppConfigVectorStoreSelectionTest.java`
+- `src/test/java/com/agent/config/KnowledgeBaseConfigBindingTest.java`
+
+### 统一结论
+- 非 Docker 本地安装 Chroma 可行，机器具备 `Python 3.12 + pip + venv` 条件。
+- `chromadb 1.5.5` 虽能启动，但已废弃 `api/v1`，与当前 `langchain4j-chroma 0.35.0` 不兼容。
+- `chromadb 0.5.20` 仍支持 `api/v1`，可与当前 Java 客户端直接对接。
+- 服务已在 `JDK 21 + Chroma 0.5.20 + 22333` 组合下重启成功，并完成“抓取 -> 搜索 -> 重启 -> 再搜索”闭环，证明向量不再随服务重启丢失。
+
+### 核心问题
+
+#### P1
+- 初始本地安装默认拿到 `chromadb 1.5.5`，其 `api/v1/heartbeat` 返回 `410 Gone`，与当前 Java 客户端期望不一致。
+- 运行时配置 `/tmp/ascend-agent-runtime.yml` 仍指向 `http://localhost:8000`，若不改会导致服务继续连接错误端口。
+
+#### P2
+- 仓库默认值和模板原先仍残留 `8000`，与实际目标端口 `22333` 不一致。
+- 默认终端 `JAVA_HOME` 仍指向 JDK8，如不显式切到 JDK21，会导致构建和测试结论失真。
+
+### 决策
+- Chroma 运行版本固定为兼容当前客户端的 `0.5.20`，不采用 `1.5.5`。
+- 向量库运行端口统一为 `22333`。
+- 应用构建与运行统一使用 JDK21。
+
+### 行动项
+- 负责人：P10 已完成仓库默认端口收口，并重启服务验证。
+- 负责人：后续如升级 `langchain4j-chroma` 或 Chroma 主版本，必须先做 API 版本兼容性评审，不能只验证端口存活。
+
+### 关键证据
+- `/tmp/chroma-22333.log`
+- `/tmp/ascend-agent-runtime.log`
+- `/tmp/ascend-agent-runtime.yml`
+- `src/main/java/com/agent/config/AppConfig.java`
+- `src/main/java/com/agent/config/KnowledgeBaseConfig.java`
