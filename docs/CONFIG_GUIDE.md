@@ -8,9 +8,7 @@
 
 | 项目 | 当前基线 | 说明 |
 |------|----------|------|
-| Java 编译目标（目标口径） | 17 | Sprint-1 目标口径；“是否已对齐”以实际构建/CI 结果为准 |
-| Java 编译目标（当前仓库配置） | 17 | 见 `pom.xml` 中 `maven.compiler.source` / `maven.compiler.target` |
-| Java 运行时（已验证口径） | JDK 21 | 当前运行口径统一为 JDK 21 |
+| Java 基线 | 21 | 编译与运行统一为 JDK 21 |
 | Spring Boot | 2.7.18 | 见 `pom.xml` |
 | 开发态向量库 | Chroma 0.5.20 | 以仓库脚本入口为准 |
 | Chroma 地址 | `http://127.0.0.1:22333` | 已替换历史旧端口口径 |
@@ -219,8 +217,7 @@ knowledge-base:
 ## 6. 启动应用
 
 当前已收口运行口径：
-- 编译目标：Java 17
-- 运行时：JDK 21
+- Java 基线：21
 - 服务端口：`8080`
 - 健康检查：`/actuator/health`
 - 长期默认运行根：`./.ascend_agent/`

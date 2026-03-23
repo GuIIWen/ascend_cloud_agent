@@ -1,12 +1,11 @@
 # ascend_agent
 
-`ascend_agent` is a Spring Boot service for API knowledge indexing and retrieval. The current baseline focuses on a reproducible local developer workflow: compile with Java 17 target bytecode, run on JDK 21, and use a locally managed Chroma `0.5.20` instance for vector persistence.
+`ascend_agent` is a Spring Boot service for API knowledge indexing and retrieval. The current baseline focuses on a reproducible local developer workflow: compile and run on Java 21, and use a locally managed Chroma `0.5.20` instance for vector persistence.
 
 ## Baseline
 
 - Spring Boot: `2.7.18`
-- Maven compiler target: Java `17`
-- Runtime JDK: `21`
+- Java baseline: `21`
 - Chroma: `0.5.20`
 - Local Chroma port: `22333`
 - Default runtime root: `./.ascend_agent/`
@@ -21,8 +20,7 @@
 
 | Component | Version / Baseline |
 | --- | --- |
-| Java compile target | 17 |
-| Recommended runtime JDK | 21 |
+| Java baseline | 21 |
 | Spring Boot | 2.7.18 |
 | Maven | 3.9+ recommended |
 | Chroma | 0.5.20 |

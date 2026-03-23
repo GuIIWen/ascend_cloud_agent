@@ -6,6 +6,68 @@
 - 建议把最新记录放在文件最上方，便于事后快速查看。
 - 记录至少包含：时间、主题、范围、统一结论、问题分级、行动项、关键证据。
 
+## 2026-03-23 16:55:00 +0800
+
+### 主题
+Sprint-1 第三批决策：Java 基线统一升到 21，Agent 先对齐后收编
+
+### 参与角色
+- P10 主线程：拍板 Java 基线与 Agent 组织策略
+- P9-Architecture：提供 Agent 先做范围与验收建议
+
+### 评审范围
+- `pom.xml`
+- `README.md`
+- `docs/CONFIG_GUIDE.md`
+- `docs/ARCHITECTURE.md`
+- `docs/DESIGN.md`
+- `docs/KNOWLEDGE_BASE.md`
+- `meeting.md`
+
+### 统一结论
+- Java 基线从“双口径”收口为单一 `21`，不再保留“编译 17、运行 21”的对外表述。
+- Agent 这条线当前不做“大一统收编”，先做边界对齐：统一运行时、配置入口、启动方式、目录合同和状态口径，确认没有偏差后再进入统一纳管。
+- 本轮工作不扩主功能，不做验收脚本，不引入新的 Agent 主链路实现。
+
+### 决策
+- `pom.xml`、README、配置与设计文档全部切换到 Java 21 单一基线。
+- Agent 当前阶段只做“对齐”，不做“收编”：
+  - 先对齐：配置入口、运行目录、启动语义、依赖基线、状态口径
+  - 暂不做：零交互主 Agent、新调度层、新流程编排
+
+### 验收结果
+- `timeout 180 mvn -q -DskipTests compile`
+  - 结果：通过
+- `timeout 180 mvn -q -Dtest=AppConfigRuntimePathTest,KnowledgeBaseConfigBindingTest,AppConfigModelSelectionTest,AppConfigVectorStoreSelectionTest,HttpModelServiceTest,HuaweiCloudApiCrawlerServiceTest test`
+  - 结果：通过
+- `timeout 180 mvn -q -DskipTests package`
+  - 结果：通过
+- 标准端口运行验证
+  - `env ASCEND_AGENT_HOME=/root/ascend_agent/.ascend_agent JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 bash scripts/start_service.sh`
+  - 结果：通过，常驻进程 PID `2359104`
+  - `curl -sS -i -m 10 http://127.0.0.1:8080/actuator/health`
+  - 结果：`HTTP/1.1 200`，返回 `{"status":"UP",...}`
+
+### 核心问题
+
+#### P1
+- 继续保留 Java 17/21 双口径会让 `pom.xml`、README、CI、运行脚本出现长期漂移，后续依赖升级会反复返工。
+
+#### P2
+- Agent 若在当前阶段直接收编到主链路，会把尚未收口的运行/配置问题一并放大，导致架构边界和责任边界一起失真。
+
+### 行动项
+- 执行层：完成 Java 21 基线代码与文档收口，并通过 `compile + test + package` 验证。
+- P10：在 Java 21 收口通过后，决定 Agent“对齐”阶段的具体验收列表。
+
+### 关键证据
+- `pom.xml`
+- `README.md`
+- `docs/CONFIG_GUIDE.md`
+- `docs/ARCHITECTURE.md`
+- `docs/DESIGN.md`
+- `docs/KNOWLEDGE_BASE.md`
+
 ## 2026-03-23 16:41:11 +0800
 
 ### 主题
