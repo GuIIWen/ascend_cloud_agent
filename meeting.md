@@ -48,6 +48,9 @@
 - `/tmp/chroma-data-22333`
 - `/tmp/chroma-22333.log`
 - `/tmp/chroma-22333.pid`
+- 运行时验证：
+  - `chromadb` 版本：`0.5.20`
+  - `GET http://127.0.0.1:22333/api/v1/heartbeat` 返回 `200 OK`
 
 ## 2026-03-20 16:00:13 +0800
 
