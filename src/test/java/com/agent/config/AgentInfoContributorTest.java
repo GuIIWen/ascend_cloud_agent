@@ -4,9 +4,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.actuate.info.Info;
 import org.springframework.boot.actuate.info.InfoContributor;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AgentInfoContributorTest {
 
@@ -34,5 +36,30 @@ class AgentInfoContributorTest {
         assertEquals("knowledge-base-controller", details.get("entrypoint"));
         assertEquals(false, details.get("zeroInteractionEnabled"));
         assertEquals(false, details.get("orchestrationEnabled"));
+        assertEquals(List.of("/api/knowledge/*"), details.get("allowedEndpoints"));
+
+        Map<String, Object> stopline = (Map<String, Object>) details.get("stopline");
+        assertEquals(true, stopline.get("active"));
+        assertEquals("alignment-only", stopline.get("policy"));
+        assertEquals("alignment", stopline.get("allowedStage"));
+        assertEquals("knowledge-base-only", stopline.get("allowedMode"));
+        assertEquals("knowledge-base-controller", stopline.get("allowedEntrypoint"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void keepsInfoFieldsCompatibleWhileAddingStoplineMetadata() {
+        AppConfig appConfig = new AppConfig();
+        Info.Builder builder = new Info.Builder();
+
+        appConfig.agentInfoContributor(new AgentConfig()).contribute(builder);
+        Map<String, Object> details = (Map<String, Object>) builder.build().getDetails().get("agent");
+
+        assertTrue(details.containsKey("enabled"));
+        assertTrue(details.containsKey("stage"));
+        assertTrue(details.containsKey("mode"));
+        assertTrue(details.containsKey("entrypoint"));
+        assertTrue(details.containsKey("zeroInteractionEnabled"));
+        assertTrue(details.containsKey("orchestrationEnabled"));
     }
 }

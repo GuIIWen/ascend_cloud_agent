@@ -21,6 +21,7 @@ logging:
     dev.langchain4j: ${LOGGING_LEVEL_LANGCHAIN4J:DEBUG}
 
 agent:
+  # Alignment stopline: any non-alignment values below must fail startup.
   enabled: ${AGENT_ENABLED:false}
   stage: ${AGENT_STAGE:alignment}
   mode: ${AGENT_MODE:knowledge-base-only}

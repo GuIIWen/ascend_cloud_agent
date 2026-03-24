@@ -31,6 +31,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -64,13 +65,27 @@ public class AppConfig {
         return builder -> {
             Map<String, Object> details = new LinkedHashMap<>();
             details.put("enabled", agentConfig.isEnabled());
-            details.put("stage", agentConfig.getStage());
-            details.put("mode", agentConfig.getMode());
-            details.put("entrypoint", agentConfig.getEntrypoint());
+            details.put("stage", agentConfig.effectiveStage());
+            details.put("mode", agentConfig.effectiveMode());
+            details.put("entrypoint", agentConfig.effectiveEntrypoint());
             details.put("zeroInteractionEnabled", agentConfig.isZeroInteractionEnabled());
             details.put("orchestrationEnabled", agentConfig.isOrchestrationEnabled());
+            details.put("allowedEndpoints", Collections.singletonList("/api/knowledge/*"));
+            Map<String, Object> stopline = new LinkedHashMap<>();
+            stopline.put("active", true);
+            stopline.put("policy", "alignment-only");
+            stopline.put("allowedStage", AgentConfig.ALLOWED_STAGE);
+            stopline.put("allowedMode", AgentConfig.ALLOWED_MODE);
+            stopline.put("allowedEntrypoint", AgentConfig.ALLOWED_ENTRYPOINT);
+            details.put("stopline", stopline);
             builder.withDetail("agent", details);
         };
+    }
+
+    @Bean
+    public Object agentStoplineGuard(AgentConfig agentConfig) {
+        agentConfig.validateAlignmentStopline();
+        return new Object();
     }
 
     Path resolveDataDir() {
