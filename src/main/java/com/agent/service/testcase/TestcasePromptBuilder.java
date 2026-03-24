@@ -22,8 +22,15 @@ public class TestcasePromptBuilder {
                 """.formatted(LLMPromptMarkers.REQUIREMENT_REFINEMENT, requirement);
     }
 
-    String buildCodeGenerationPrompt(String refinedRequirement, String context, boolean knowledgeBaseHit) {
+    String buildCodeGenerationPrompt(
+            String refinedRequirement,
+            String context,
+            boolean knowledgeBaseHit,
+            Integer expectedHttpStatus,
+            String expectedErrorCode) {
         String sourceMode = knowledgeBaseHit ? "knowledge-base-rag" : "reference-url-fallback";
+        String statusHint = expectedHttpStatus == null ? "not-provided" : expectedHttpStatus.toString();
+        String errorCodeHint = hasText(expectedErrorCode) ? expectedErrorCode : "not-provided";
         return """
                 %s
                 你是Java测试工程师，请根据需求和上下文直接生成可编译的JUnit5测试类代码。
@@ -39,13 +46,28 @@ public class TestcasePromptBuilder {
                    - 系统属性：hwcloud.auth.token、hwcloud.project.id、hwcloud.base.url
                 8) 如果缺少必要运行参数，可在测试中使用 JUnit5 Assumptions 跳过，不要输出假的默认值。
                 9) 只生成一个最小但完整的测试类，避免无关辅助代码。
+                10) 如果显式期望已提供，断言必须优先使用显式期望，不得被模型自行改写。
+                11) 如果显式期望未提供，且上下文没有明确状态码/错误码，不要臆造具体状态码或错误码；可以用注释说明待确认。
 
                 来源模式：%s
+                显式期望：
+                - expectedHttpStatus: %s
+                - expectedErrorCode: %s
                 优化后的测试需求：
                 %s
 
                 可用上下文：
                 %s
-                """.formatted(LLMPromptMarkers.TESTCASE_GENERATION, sourceMode, refinedRequirement, context);
+                """.formatted(
+                LLMPromptMarkers.TESTCASE_GENERATION,
+                sourceMode,
+                statusHint,
+                errorCodeHint,
+                refinedRequirement,
+                context);
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
     }
 }

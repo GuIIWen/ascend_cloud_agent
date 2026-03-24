@@ -31,6 +31,8 @@ class TestcaseGenerationControllerTest {
         TestcaseGenerateRequest request = new TestcaseGenerateRequest();
         request.setRequirement("  验证创建实例成功  ");
         request.setReferenceUrl("  https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html  ");
+        request.setExpectedHttpStatus(400);
+        request.setExpectedErrorCode("  MODELARTS_001  ");
 
         ResponseEntity<?> response = controller.generate(request);
 
@@ -49,6 +51,8 @@ class TestcaseGenerationControllerTest {
         assertEquals("https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html", secondCitation.getSource());
         assertEquals("验证创建实例成功", service.capturedRequirement);
         assertEquals("https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html", service.capturedReferenceUrl);
+        assertEquals(400, service.capturedExpectedHttpStatus);
+        assertEquals("MODELARTS_001", service.capturedExpectedErrorCode);
     }
 
     @Test
@@ -65,6 +69,23 @@ class TestcaseGenerationControllerTest {
         ApiErrorResponse error = assertInstanceOf(ApiErrorResponse.class, response.getBody());
         assertEquals("INVALID_ARGUMENT", error.getError().getCode());
         assertEquals("requirement", error.getError().getDetails().get("field"));
+        assertFalse(service.called);
+    }
+
+    @Test
+    void generateRejectsInvalidExpectedHttpStatus() {
+        GuardService service = new GuardService();
+        TestcaseGenerationController controller = new TestcaseGenerationController(service);
+        TestcaseGenerateRequest request = new TestcaseGenerateRequest();
+        request.setRequirement("验证失败状态");
+        request.setExpectedHttpStatus(99);
+
+        ResponseEntity<?> response = controller.generate(request);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        ApiErrorResponse error = assertInstanceOf(ApiErrorResponse.class, response.getBody());
+        assertEquals("INVALID_ARGUMENT", error.getError().getCode());
+        assertEquals("expectedHttpStatus", error.getError().getDetails().get("field"));
         assertFalse(service.called);
     }
 
@@ -90,11 +111,15 @@ class TestcaseGenerationControllerTest {
     private static final class SuccessService implements TestcaseGenerationService {
         private String capturedRequirement;
         private String capturedReferenceUrl;
+        private Integer capturedExpectedHttpStatus;
+        private String capturedExpectedErrorCode;
 
         @Override
         public TestcaseGenerationResult generate(TestcaseGenerationRequest request) {
             this.capturedRequirement = request.getRequirement();
             this.capturedReferenceUrl = request.getReferenceUrl();
+            this.capturedExpectedHttpStatus = request.getExpectedHttpStatus();
+            this.capturedExpectedErrorCode = request.getExpectedErrorCode();
             return new TestcaseGenerationResult(
                     "assertEquals(200, response.getStatusCode());",
                     List.of(

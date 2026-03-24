@@ -85,6 +85,8 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
             throw new IllegalArgumentException("requirement must not be blank");
         }
         String referenceUrl = normalize(request.getReferenceUrl());
+        Integer expectedHttpStatus = request.getExpectedHttpStatus();
+        String expectedErrorCode = normalize(request.getExpectedErrorCode());
         List<ApiMetadata> rawKnowledgeBaseHits = List.of();
 
         if (!hasText(referenceUrl)) {
@@ -121,7 +123,9 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
         String generationPrompt = promptBuilder.buildCodeGenerationPrompt(
                 refinedRequirement,
                 context,
-                !effectiveKbResults.isEmpty());
+                !effectiveKbResults.isEmpty(),
+                expectedHttpStatus,
+                expectedErrorCode);
         String javaTestCode = cleanupCodeFence(llmService.generateTestCode(generationPrompt));
         if (!hasText(javaTestCode)) {
             throw new IllegalStateException("LLM returned empty testcase code");

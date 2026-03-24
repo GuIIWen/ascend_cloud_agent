@@ -5,6 +5,7 @@ import com.agent.model.testcase.TestcaseCitationResponse;
 import com.agent.model.testcase.TestcaseGenerateRequest;
 import com.agent.model.testcase.TestcaseGenerateResponse;
 import com.agent.service.testcase.TestcaseCitation;
+import com.agent.service.testcase.TestcaseGenerationRequest;
 import com.agent.service.testcase.TestcaseGenerationResult;
 import com.agent.service.testcase.TestcaseGenerationService;
 import org.springframework.http.ResponseEntity;
@@ -40,7 +41,14 @@ public class TestcaseGenerationController {
 
         String requirement = request.getRequirement().trim();
         String referenceUrl = normalizeReferenceUrl(request.getReferenceUrl());
-        TestcaseGenerationResult result = testcaseGenerationService.generate(requirement, referenceUrl);
+        Integer expectedHttpStatus = normalizeExpectedHttpStatus(request.getExpectedHttpStatus());
+        String expectedErrorCode = normalizeExpectedErrorCode(request.getExpectedErrorCode());
+        TestcaseGenerationResult result = testcaseGenerationService.generate(
+                new TestcaseGenerationRequest(
+                        requirement,
+                        referenceUrl,
+                        expectedHttpStatus,
+                        expectedErrorCode));
         return ResponseEntity.ok(toResponse(result));
     }
 
@@ -58,6 +66,11 @@ public class TestcaseGenerationController {
                 return validationError("referenceUrl", "referenceUrl must start with http:// or https://");
             }
         }
+
+        Integer expectedHttpStatus = request.getExpectedHttpStatus();
+        if (expectedHttpStatus != null && (expectedHttpStatus < 100 || expectedHttpStatus > 599)) {
+            return validationError("expectedHttpStatus", "expectedHttpStatus must be between 100 and 599");
+        }
         return null;
     }
 
@@ -72,6 +85,18 @@ public class TestcaseGenerationController {
             return null;
         }
         String normalized = referenceUrl.trim();
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private Integer normalizeExpectedHttpStatus(Integer expectedHttpStatus) {
+        return expectedHttpStatus;
+    }
+
+    private String normalizeExpectedErrorCode(String expectedErrorCode) {
+        if (expectedErrorCode == null) {
+            return null;
+        }
+        String normalized = expectedErrorCode.trim();
         return normalized.isEmpty() ? null : normalized;
     }
 

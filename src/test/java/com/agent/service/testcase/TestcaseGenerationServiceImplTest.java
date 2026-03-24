@@ -9,6 +9,7 @@ import dev.langchain4j.data.document.Metadata;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -179,5 +180,30 @@ class TestcaseGenerationServiceImplTest {
         assertTrue(result.getJavaTestCode().contains("requiredConfig(\"HUAWEICLOUD_PROJECT_ID\", \"hwcloud.project.id\")"));
         assertTrue(result.getJavaTestCode().contains("requiredConfig(\"HUAWEICLOUD_AUTH_TOKEN\", \"hwcloud.auth.token\")"));
         assertFalse(result.getJavaTestCode().toLowerCase().contains("placeholder"));
+    }
+
+    @Test
+    void generatePassesExpectedFieldsIntoGenerationPrompt() throws IOException {
+        String referenceUrl = "https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html";
+        Metadata metadata = new Metadata();
+        metadata.put("source", referenceUrl);
+        metadata.put("title", "ModelArts API");
+        Document document = Document.from("DELETE /v2/{project_id}/workflows/{workflow_id}", metadata);
+
+        when(llmService.generateTestCode(anyString()))
+                .thenReturn("优化后的需求")
+                .thenReturn("public class DeleteWorkflowTest {}");
+        when(knowledgeBaseService.search(eq("优化后的需求"), anyInt())).thenReturn(List.of());
+        when(webDocumentCrawler.crawl(referenceUrl)).thenReturn(document);
+
+        TestcaseGenerationResult result = service.generate(
+                new TestcaseGenerationRequest("验证删除工作流", referenceUrl, 400, "MODELARTS_001"));
+
+        assertNotNull(result);
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmService, times(2)).generateTestCode(promptCaptor.capture());
+        String generationPrompt = promptCaptor.getAllValues().get(1);
+        assertTrue(generationPrompt.contains("expectedHttpStatus: 400"));
+        assertTrue(generationPrompt.contains("expectedErrorCode: MODELARTS_001"));
     }
 }
