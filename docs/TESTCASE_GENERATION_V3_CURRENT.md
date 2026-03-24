@@ -5,8 +5,9 @@ Status: **Execution design** (current version, implementable constraints)
 This document is the *current* Batch 3 design baseline for: **testcase requirement (+ optional referenceUrl) -> Java testcase code**.
 It is intentionally constrained and must not drift into "收编" (planner/workflow/orchestrator or auto-execution).
 
-Related hard-rule baseline:
-- `docs/TESTCASE_GENERATION_MVP_CURRENT.md` (P10 approved hard rules; if any conflict, that file wins)
+Current rule authority:
+- This document is the execution baseline for Batch 3.
+- Product hard decisions are recorded in `meeting.md` (latest Batch 3 entries).
 
 ## 1. Background And Goal
 
@@ -46,6 +47,7 @@ Response JSON (HTTP 200):
 ```json
 {
   "javaTestCode": "/* full Java test code */",
+  "degraded": false,
   "citations": [
     {
       "type": "knowledge-base",
@@ -63,6 +65,9 @@ Response JSON (HTTP 200):
 Notes:
 - `citations` is required for traceability (KB RAG sources and/or referenceUrl).
 - "KB hit" is defined as: at least one retrieved item can be resolved to a concrete API metadata record (e.g. `apiId` exists and metadata lookup succeeds). A vector store returning text segments alone is not a KB hit.
+- `degraded` semantics:
+  - `false`: generation used normal KB hit RAG context as primary source.
+  - `true`: generation succeeded but used fallback/partial context (for example KB miss + referenceUrl temporary context).
 
 ## 4. Generation Chain (Single Request, No Orchestration)
 
@@ -100,6 +105,7 @@ Domain errors (hard rules):
   - `error.code=TESTCASE_REFERENCE_URL_REQUIRED`
   - `error.message` must instruct the user to provide `referenceUrl`
   - Response must not contain `javaTestCode`
+  - Response must not contain `degraded`
 
 Suggested error payload shape:
 ```json
@@ -136,6 +142,9 @@ Batch 3 must not introduce a new config tree unless explicitly approved by P10.
 - `POST /api/testcase/generate` returns Java testcase code when:
   - KB hit exists, regardless of `referenceUrl`.
   - KB miss but `referenceUrl` is provided and fetch succeeds (uses temporary context).
+- Success response must include all three fields: `javaTestCode`, `citations`, `degraded`.
+- `degraded=false` when KB hit context drives generation.
+- `degraded=true` when generation is completed via fallback/partial context path.
 - The endpoint returns an error and generates **no code** when:
   - KB miss and `referenceUrl` is absent.
 - All generation steps use the configured custom LLM (no hardcoded vendor/model in code path).
@@ -152,5 +161,4 @@ The following docs are **goal design / larger scope** and must not be treated as
 - `docs/USE_CASE_OPTIMIZER.md`
 
 Batch 3 execution hard rules:
-- `docs/TESTCASE_GENERATION_MVP_CURRENT.md` remains the hard-rule baseline.
-
+- This file + `meeting.md` latest Batch 3 decisions are the current baseline.
