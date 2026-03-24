@@ -1,7 +1,7 @@
 # Java测试用例生成Agent - 技术设计文档
 
 > 文档状态：Draft（目标设计）。本文件描述“端到端测试生成”的目标形态，不代表当前仓库已具备全部能力。  
-> Batch 3 current execution baseline: see `docs/TESTCASE_GENERATION_V3_CURRENT.md`.  
+> Batch 3 current execution baseline: see `docs/TESTCASE_GENERATION_V3_CURRENT.md` + latest Batch 3 decisions in `meeting.md`.  
 > 当前实现主要集中在“知识库 v1/v2 基础设施原型与 Spring 接入骨架”，端到端主链路（Agent/用例优化/代码生成/写入测试文件）尚未在 `src/main/java` 中落地。  
 > 运行与配置基线以 [CONFIG_GUIDE.md](/root/ascend_agent/docs/CONFIG_GUIDE.md) 为准。
 

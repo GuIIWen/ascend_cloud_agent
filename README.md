@@ -194,4 +194,4 @@ CI intentionally does not provision Chroma or boot the full application. It is a
 - Service stop script: [scripts/stop_service.sh](/root/ascend_agent/scripts/stop_service.sh)
 - Baseline verification script: [scripts/verify_baseline.sh](/root/ascend_agent/scripts/verify_baseline.sh)
 - CI workflow: [.github/workflows/ci.yml](/root/ascend_agent/.github/workflows/ci.yml)
-- Batch 3 testcase generation current execution design (source of truth): [docs/TESTCASE_GENERATION_V3_CURRENT.md](/root/ascend_agent/docs/TESTCASE_GENERATION_V3_CURRENT.md)
+- Batch 3 testcase generation execution baseline: [docs/TESTCASE_GENERATION_V3_CURRENT.md](/root/ascend_agent/docs/TESTCASE_GENERATION_V3_CURRENT.md) + latest Batch 3 decisions in `meeting.md`

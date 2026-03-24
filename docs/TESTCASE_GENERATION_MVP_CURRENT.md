@@ -1,8 +1,9 @@
-# Testcase Generation MVP (Current Execution Baseline, Batch 3)
+# Testcase Generation MVP (Batch 3 Hard-Rule Summary / Historical Closure)
 
-Status: **Execution baseline** (P10 approved hard rules)
+Status: **Historical summary** (not the active execution baseline)
 
-This document defines the minimal, shippable Batch 3 scope: the service accepts a user test requirement (plus an optional reference URL) and returns **Java test code**. It is intentionally smaller than the "goal design" docs under `docs/`.
+This document captures the previously agreed Batch 3 hard rules as a compact summary.
+It is kept for historical closure and quick reference, but it is **not** the active execution baseline.
 
 ## Background And Goal
 
@@ -121,5 +122,6 @@ These documents remain as **goal design / larger scope** and are not the executi
 - `docs/API_TEST_GENERATOR.md`
 - `docs/USE_CASE_OPTIMIZER.md`
 
-For Batch 3 execution and acceptance, **this document is the source of truth**.
-
+For Batch 3 execution and acceptance, use:
+- `docs/TESTCASE_GENERATION_V3_CURRENT.md`
+- latest Batch 3 decisions in `meeting.md`
