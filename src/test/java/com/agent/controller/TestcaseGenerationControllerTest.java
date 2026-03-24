@@ -90,6 +90,21 @@ class TestcaseGenerationControllerTest {
     }
 
     @Test
+    void generateNormalizesBlankExpectedErrorCodeToNull() {
+        SuccessService service = new SuccessService();
+        TestcaseGenerationController controller = new TestcaseGenerationController(service);
+        TestcaseGenerateRequest request = new TestcaseGenerateRequest();
+        request.setRequirement("验证创建实例成功");
+        request.setReferenceUrl("https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html");
+        request.setExpectedErrorCode("   ");
+
+        ResponseEntity<?> response = controller.generate(request);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNull(service.capturedExpectedErrorCode);
+    }
+
+    @Test
     void generatePropagatesKbMissWithoutReferenceUrlError() {
         NoHitWithoutUrlService service = new NoHitWithoutUrlService();
         TestcaseGenerationController controller = new TestcaseGenerationController(service);
