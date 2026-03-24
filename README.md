@@ -195,3 +195,4 @@ CI intentionally does not provision Chroma or boot the full application. It is a
 - Baseline verification script: [scripts/verify_baseline.sh](/root/ascend_agent/scripts/verify_baseline.sh)
 - CI workflow: [.github/workflows/ci.yml](/root/ascend_agent/.github/workflows/ci.yml)
 - Batch 3 testcase generation MVP baseline: [docs/TESTCASE_GENERATION_MVP_CURRENT.md](/root/ascend_agent/docs/TESTCASE_GENERATION_MVP_CURRENT.md)
+- Batch 3 testcase generation current execution design: [docs/TESTCASE_GENERATION_V3_CURRENT.md](/root/ascend_agent/docs/TESTCASE_GENERATION_V3_CURRENT.md)
