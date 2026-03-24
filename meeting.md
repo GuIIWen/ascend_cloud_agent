@@ -6,6 +6,77 @@
 - 建议把最新记录放在文件最上方，便于事后快速查看。
 - 记录至少包含：时间、主题、范围、统一结论、问题分级、行动项、关键证据。
 
+## 2026-03-24 09:35:11 +0800
+
+### 主题
+Sprint-1 第五批交付验收：服务生命周期脚本、CI/package 门禁与 shutdown 风险缓解
+
+### 参与角色
+- P10 主线程：定义“剩余收口项”并完成验收
+
+### 评审范围
+- `scripts/start_service.sh`
+- `scripts/stop_service.sh`
+- `scripts/verify_baseline.sh`
+- `.github/workflows/ci.yml`
+- `src/main/resources/application.yml.template`
+- `README.md`
+- `docs/CONFIG_GUIDE.md`
+- `meeting.md`
+
+### 统一结论
+- 服务生命周期的标准入口已补齐：启动使用 `scripts/start_service.sh`，停止使用 `scripts/stop_service.sh`，不再把手工 `kill` 作为标准停服务路径。
+- 本地基线验证与 CI 门禁都已升级到 `compile + 定向测试 + package`，主分支不再只保证“能编译”，也要保证“能产出可运行 jar”。
+- 启动脚本显式传入 `--logging.register-shutdown-hook=false`，作为 packaged jar 退出路径日志竞态的缓解措施。
+- 主服务已在 `8080` 上以最新 wrapper 重启，`/actuator/health` 与 `/actuator/info` 均通过。
+
+### 验收结果
+- `bash -n scripts/start_service.sh`
+  - 结果：通过
+- `bash -n scripts/stop_service.sh`
+  - 结果：通过
+- `bash -n scripts/verify_baseline.sh`
+  - 结果：通过
+- `timeout 180 mvn -q -DskipTests compile`
+  - 结果：通过
+- `timeout 180 mvn -q -Dtest=AgentConfigBindingTest,AgentInfoContributorTest,AppConfigRuntimePathTest,KnowledgeBaseConfigBindingTest,AppConfigModelSelectionTest,AppConfigVectorStoreSelectionTest,HttpModelServiceTest,HuaweiCloudApiCrawlerServiceTest test`
+  - 结果：通过
+- `timeout 180 mvn -q -DskipTests package`
+  - 结果：通过
+- 隔离实例停服务验证
+  - `env ASCEND_AGENT_HOME=/root/ascend_agent/.ascend_agent-test ASCEND_AGENT_PORT=18081 JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 bash scripts/start_service.sh`
+  - `env ASCEND_AGENT_HOME=/root/ascend_agent/.ascend_agent-test bash scripts/stop_service.sh`
+  - 结果：通过；日志中未再出现 `ThrowableProxy` / `SpringApplicationShutdownHook` 异常
+- 主服务回切验证
+  - `env ASCEND_AGENT_HOME=/root/ascend_agent/.ascend_agent bash scripts/stop_service.sh`
+  - `env ASCEND_AGENT_HOME=/root/ascend_agent/.ascend_agent JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 bash scripts/start_service.sh`
+  - `curl -sS -i -m 10 http://127.0.0.1:8080/actuator/health`
+  - `curl -sS -i -m 10 http://127.0.0.1:8080/actuator/info`
+  - 结果：通过；当前常驻进程 PID `2748596`
+
+### 核心问题
+
+#### P1
+- shutdown 异常在当前基线下已经无法稳定复现，因此本轮更准确的处理是“标准化停服务路径 + 关闭日志 shutdown hook 竞态源”，而不是宣称已定位到唯一代码根因。
+
+#### P2
+- 当前剩余阻塞不在代码和运行态，而在远端写入链路：`git push` 仍有超时现象，需要继续治理 GitHub 写操作认证/传输链路。
+
+### 决策
+- 以后服务停机优先使用 `scripts/stop_service.sh`，不再把裸 `kill` 作为标准文档路径。
+- CI 与本地 `verify_baseline.sh` 都以 `package` 作为最低发布门禁之一。
+
+### 行动项
+- P10：把本轮剩余收口项提交并推送远端。
+- 后续执行层：继续排查 `git push` 写链路，直到主分支最新提交成功上远端。
+
+### 关键证据
+- `scripts/start_service.sh`
+- `scripts/stop_service.sh`
+- `scripts/verify_baseline.sh`
+- `.github/workflows/ci.yml`
+- `.ascend_agent/logs/service.log`
+
 ## 2026-03-23 17:33:00 +0800
 
 ### 主题

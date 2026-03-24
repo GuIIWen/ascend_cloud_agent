@@ -35,6 +35,7 @@ setsid nohup java \
   -Dascend.agent.data-dir="$APP_DATA_DIR" \
   -jar "$JAR_PATH" \
   --server.port="$SERVER_PORT" \
+  --logging.register-shutdown-hook=false \
   --knowledge-base.vector-store.type=chroma \
   --knowledge-base.vector-store.url="$CHROMA_URL" \
   --knowledge-base.vector-store.collection="$CHROMA_COLLECTION" \

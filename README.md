@@ -118,6 +118,12 @@ curl -i http://127.0.0.1:8080/actuator/info
 
 Expected: the response includes `agent.stage=alignment`, `agent.enabled=false`, and `agent.mode=knowledge-base-only`.
 
+Stop the service:
+
+```bash
+bash scripts/stop_service.sh
+```
+
 ## Directory Contract
 
 The approved long-lived local directory contract is rooted at `ASCEND_AGENT_HOME=./.ascend_agent/`.
@@ -150,7 +156,8 @@ That script runs:
 
 ```bash
 timeout 120 mvn -q -DskipTests compile
-timeout 120 mvn -q -Dtest=KnowledgeBaseConfigBindingTest,AppConfigModelSelectionTest,AppConfigVectorStoreSelectionTest,HttpModelServiceTest,HuaweiCloudApiCrawlerServiceTest test
+timeout 120 mvn -q -Dtest=AgentConfigBindingTest,AgentInfoContributorTest,AppConfigRuntimePathTest,KnowledgeBaseConfigBindingTest,AppConfigModelSelectionTest,AppConfigVectorStoreSelectionTest,HttpModelServiceTest,HuaweiCloudApiCrawlerServiceTest test
+timeout 180 mvn -q -DskipTests package
 ```
 
 The script forces `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64` so it does not inherit a stale Java 8 shell environment.
@@ -162,6 +169,8 @@ The repository includes a minimal GitHub Actions workflow at `.github/workflows/
 It currently enforces:
 
 - Maven compile on JDK 21
+- Maven package on JDK 21
+- Agent/runtime status contract tests
 - Configuration and model selection tests
 - HTTP model client tests
 - Huawei Cloud crawler service unit test
@@ -175,10 +184,13 @@ CI intentionally does not provision Chroma or boot the full application. It is a
 - The repository does not currently provide a single command that provisions Chroma and the Spring Boot service together. Use the documented Chroma scripts plus [scripts/start_service.sh](/root/ascend_agent/scripts/start_service.sh).
 - The project contains additional local-only files and environment-specific workflows not covered by this README.
 - For local service startup, pass the vector store URL and data directory explicitly if your local config still points somewhere else.
+- Service startup disables Boot's logging shutdown hook in the wrapper script to reduce shutdown-time logging races in packaged runs.
 
 ## File Map
 
 - Chroma install script: [scripts/install_chroma_0520.sh](/root/ascend_agent/scripts/install_chroma_0520.sh)
 - Chroma start script: [scripts/start_chroma_22333.sh](/root/ascend_agent/scripts/start_chroma_22333.sh)
+- Service start script: [scripts/start_service.sh](/root/ascend_agent/scripts/start_service.sh)
+- Service stop script: [scripts/stop_service.sh](/root/ascend_agent/scripts/stop_service.sh)
 - Baseline verification script: [scripts/verify_baseline.sh](/root/ascend_agent/scripts/verify_baseline.sh)
 - CI workflow: [.github/workflows/ci.yml](/root/ascend_agent/.github/workflows/ci.yml)

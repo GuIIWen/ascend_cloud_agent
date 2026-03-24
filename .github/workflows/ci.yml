@@ -27,5 +27,8 @@ jobs:
       - name: Key Unit Tests
         run: >
           timeout 120 mvn -q
-          -Dtest=KnowledgeBaseConfigBindingTest,AppConfigModelSelectionTest,AppConfigVectorStoreSelectionTest,HttpModelServiceTest,HuaweiCloudApiCrawlerServiceTest
+          -Dtest=AgentConfigBindingTest,AgentInfoContributorTest,AppConfigRuntimePathTest,KnowledgeBaseConfigBindingTest,AppConfigModelSelectionTest,AppConfigVectorStoreSelectionTest,HttpModelServiceTest,HuaweiCloudApiCrawlerServiceTest
           test
+
+      - name: Package
+        run: timeout 180 mvn -q -DskipTests package

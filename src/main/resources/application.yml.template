@@ -15,6 +15,7 @@ management:
       show-details: ${MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS:always}
 
 logging:
+  register-shutdown-hook: ${LOGGING_REGISTER_SHUTDOWN_HOOK:false}
   level:
     com.agent: ${LOGGING_LEVEL_COM_AGENT:INFO}
     dev.langchain4j: ${LOGGING_LEVEL_LANGCHAIN4J:DEBUG}

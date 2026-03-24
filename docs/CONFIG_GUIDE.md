@@ -19,6 +19,7 @@
 | 应用运行入口 | `target/ascend-agent-1.0.0.jar` | 运行时建议显式设置 `JAVA_HOME`/`PATH` |
 | 长期默认运行根（目录合同） | `./.ascend_agent/` | 以 `ASCEND_AGENT_HOME` 为根管理本地持久化目录 |
 | Agent 当前阶段 | `alignment` | 通过 `/actuator/info` 暴露运行态事实 |
+| 服务停止入口 | `scripts/stop_service.sh` | 优先使用脚本停服务，不再以手工 `kill` 作为标准路径 |
 
 ### 0.2 配置优先级与生效入口
 
@@ -73,6 +74,9 @@
 ```yaml
 server:
   port: ${SERVER_PORT:8080}
+
+logging:
+  register-shutdown-hook: ${LOGGING_REGISTER_SHUTDOWN_HOOK:false}
 
 agent:
   enabled: ${AGENT_ENABLED:false}
@@ -142,7 +146,17 @@ knowledge-base:
 | `knowledge-base.vector-store.url` | 向量库地址 | `http://127.0.0.1:22333` |
 | `knowledge-base.vector-store.collection` | Chroma Collection | `api-knowledge-base` |
 
-### 1.3 环境变量示例
+### 1.4 运行包装与停服务
+
+当前仓库对应用运行包装的标准路径：
+- 启动：`bash scripts/start_service.sh`
+- 停止：`bash scripts/stop_service.sh`
+
+当前约束：
+- 启动脚本显式传入 `--logging.register-shutdown-hook=false`，用于规避 packaged jar 在 JVM 退出路径上的日志关闭竞态。
+- 手工 `kill` 只允许作为排障动作，不再作为标准停服务手法。
+
+### 1.5 环境变量示例
 
 ```bash
 export EMBEDDING_API_URL=https://your-embedding-api.com/v1/embeddings
@@ -270,5 +284,6 @@ java \
 | 本地文件散落在 `/tmp` | 启动后日志/数据目录不在仓库下 | 显式设置 `ASCEND_AGENT_HOME`，并同步导出 `CHROMA_*` 覆盖变量 |
 | 配置不生效 | 修改了模板但运行结果未变 | 确认修改的是运行时 `application.yml`，不是仅修改模板 |
 | 误以为主 Agent 已上线 | 文档提到 Agent，但代码里没有主链路 | 以 `/actuator/info` 中的 `agent.*` 字段为准，当前应为 `alignment / false / knowledge-base-only` |
+| 停服务时日志异常 | 退出路径出现 shutdown hook 日志栈报错 | 使用 `scripts/stop_service.sh`，并保持 `logging.register-shutdown-hook=false` |
 | Java 启动失败 | `java -version` 不符合预期 | 显式设置 `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64` |
 | 模型调用异常 | 401/超时/空响应 | 优先检查对应 `*_API_URL` / `*_API_KEY` 环境变量 |
