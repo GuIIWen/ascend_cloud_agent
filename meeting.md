@@ -1188,3 +1188,116 @@ Sprint-1 战略启动：工程化基线固化、P9 分工与文档验收口径
 - `/tmp/ascend-agent-runtime.yml`
 - `src/main/java/com/agent/config/AppConfig.java`
 - `src/main/java/com/agent/config/KnowledgeBaseConfig.java`
+
+## 2026-03-24 09:48:23 +0800
+
+### 主题
+P10 对第二批 Agent 对齐工作做架构拍板，并把当前运行态异常拆出独立缺陷卡
+
+### 参与角色
+- P10 主线程：核对代码事实、审核 P9 产出、决定放行顺序与红线
+- P9：提交架构评审与三张任务卡，负责继续向执行层分发
+- P8：待领取 `WP3` 与“运行态异常”两张执行卡
+
+### 评审范围
+- `src/main/java/com/agent/controller/KnowledgeBaseController.java`
+- `src/main/java/com/agent/service/KnowledgeBaseServiceImpl.java`
+- `src/main/java/com/agent/storage/MetadataStore.java`
+- `src/main/java/com/agent/config/AgentConfig.java`
+- `src/main/java/com/agent/config/AppConfig.java`
+- `docs/ARCHITECTURE.md`
+- `docs/DESIGN.md`
+- `docs/CONFIG_GUIDE.md`
+- `/tmp/ascend-agent-runtime.log`
+
+### 统一结论
+- P9 给出的三张任务卡方向正确，但执行顺序必须固定为 `WP3 -> WP1 -> WP2`，不允许并行放大 scope。
+- 当前仓库的第二批对齐缺口是三类：运行态停止线还没把“允许入口”做成硬事实；`/api/knowledge/*` 返回与错误契约仍是 ad hoc；检索链路对元数据缺失仍会静默丢结果。
+- 当前运行态还存在独立缺陷：`/tmp/ascend-agent-runtime.log` 出现 `SpringApplicationShutdownHook` 的 `NoClassDefFoundError`；同轮本机探活出现 `curl` 失败而端口监听信息不稳定，需单独排障，不得借机扩成“主 Agent 重构”。
+
+### 核心问题
+
+#### P1
+- `KnowledgeBaseController` 四个 `/api/knowledge/*` 接口仍直接返回 `Map<String, Object>`，没有统一错误体、参数校验和兼容性声明；这是 `WP1` 需要收口的事实基础。
+- `KnowledgeBaseServiceImpl.search()` 在 `apiId` 存在但 `metadataStore.findByApiId()` 为空或抛错时，会直接丢掉该向量命中，只留下日志或返回更少结果；这会把弱一致问题放大成检索不稳定。
+
+#### P2
+- `indexJavaProject()` 当前先写 SQLite 元数据再批量写向量，没有事务协调；本轮只能按“弱一致 + 显式降级”收口，不能误做成强一致重构。
+- `/actuator/info` 当前暴露了 `enabled/stage/mode/entrypoint`，但还没有把“当前允许的唯一对外入口是 /api/knowledge/*”写成运行态事实，这就是 `WP3` 必须先发的原因。
+- 当前运行态存在独立生命周期异常，排障任务必须与对齐主线分离，否则执行层会借“修服务”扩大改动面。
+
+### 决策
+- P10 正式批准 P9 三张任务卡，但放行顺序固定为 `WP3 -> WP1 -> WP2`。
+- 第一张立即放行的是 `WP3`，目标是把“只对齐不收编”固化到配置、运行态和验收门禁中。
+- 运行态异常单独建缺陷卡处理，边界仅限服务生命周期和探活异常，不得新增任何主 Agent 风格 API、`workflow/planner/executor` 路径或新存储。
+- 当前批次继续执行红线：不得新增 `/api/agent/*`、`/api/plan/*`、`/api/execute/*`、`/api/workflow/*`；不得引入 `orchestration/planner/executor/workflow` 真实实现；不得把知识库链路升级成“检索 + 生成”主链路；不得新增存储或中间件。
+
+### 行动项
+- 负责人：P9 立即向执行层下发 `WP3` 六要素任务卡，并把提交要求固定为“先 commit，再验证，再汇报”。
+- 负责人：P9 额外下发“运行态异常”缺陷卡，要求在不扩 scope 的前提下定位 `SpringApplicationShutdownHook` 和探活异常。
+- 负责人：P10 仅按 `meeting.md`、`/actuator/info`、`scripts/verify_baseline.sh` 和红线扫描做验收，不直接代做执行层工作。
+
+### 关键证据
+- `src/main/java/com/agent/controller/KnowledgeBaseController.java`
+- `src/main/java/com/agent/service/KnowledgeBaseServiceImpl.java`
+- `src/main/java/com/agent/storage/MetadataStore.java`
+- `src/main/java/com/agent/config/AgentConfig.java`
+- `src/main/java/com/agent/config/AppConfig.java`
+- `/tmp/ascend-agent-runtime.log`
+
+## 2026-03-24 10:32:03 +0800
+
+### 主题
+P10 验收 `WP3` 停止线固化与运行态异常修复，并确认可进入 `WP1`
+
+### 参与角色
+- P10 主线程：做最终验收、复核运行态、记录结论
+- P9：前序已完成任务卡下发与红线约束
+- P8：完成 `WP3` 与运行态异常两条执行线并分别提交
+
+### 评审范围
+- `src/main/java/com/agent/config/AgentConfig.java`
+- `src/main/java/com/agent/config/AppConfig.java`
+- `src/main/resources/application.yml.template`
+- `src/test/java/com/agent/config/AgentInfoContributorTest.java`
+- `src/test/java/com/agent/config/AgentStoplineHardeningTest.java`
+- `src/test/java/com/agent/runtime/StartupRuntimeGuardrailsTest.java`
+- `scripts/start_service.sh`
+- `scripts/stop_service.sh`
+- `/root/ascend_agent/.ascend_agent/logs/service.log`
+- `/tmp/ascend-agent-runtime.log`
+
+### 统一结论
+- `WP3` 已验收通过：启动期对越线配置执行 fail-fast，`/actuator/info` 在兼容原有字段的同时新增 `allowedEndpoints` 与 `stopline`，明确当前唯一允许入口是 `/api/knowledge/*`。
+- 运行态异常已验收通过：启动脚本不再误继承宿主机 Java 8，服务成功链路从“进程活着”收紧为“`/actuator/health` 可达”，停机后 `8080` 正常释放。
+- 历史 `SpringApplicationShutdownHook -> ThrowableProxy` 异常只存在于旧验证路径 `/tmp/ascend-agent-runtime.log`；本轮标准日志 `/root/ascend_agent/.ascend_agent/logs/service.log` 未复现该异常。
+- 第二批对齐顺序不变：`WP3` 完成后，下一张允许放行的是 `WP1`；`WP2` 继续排在其后。
+
+### 核心问题
+
+#### P1
+- `WP3` 初次提交只做到代码与 compile 级别验证，未重新 `package` 即启动旧 jar，导致 `/actuator/info` 一度看不到新字段；P10 本轮要求补齐“重打包 + 真实起停”后才通过验收。
+- 运行态问题根因不是单点，而是两个缺陷叠加：旧启动链路会误用 Java 8，旧成功判定又只看进程存活，不看健康探活。
+
+#### P2
+- 旧停机链路过度依赖 pid 文件，遇到 pid 漂移会降低可控性；本轮已补为 pid 文件与端口监听双重判定。
+- 标准运行日志已迁移到 `ASCEND_AGENT_HOME`，后续排障不得再把 `/tmp/ascend-agent-runtime.log` 当成当前基线日志。
+
+### 决策
+- 接受提交 `5f0c1f9` `feat: harden alignment stopline` 作为 `WP3` 完成交付。
+- 接受提交 `da00b33` `fix(runtime): harden service startup and health checks` 作为运行态异常修复交付。
+- P10 正式放行下一阶段 `WP1`，继续禁止提前启动 `WP2` 或任何主 Agent 收编动作。
+
+### 行动项
+- 负责人：P9 依据本条纪要，向执行层放行 `WP1`，范围仅限 `/api/knowledge/*` 契约与错误模型收口。
+- 负责人：P10 在 `WP1` 合入前继续使用红线扫描，阻断任何 `/api/agent/*`、`/plan`、`/execute`、`/workflow` 扩张。
+- 负责人：后续所有运行态验收统一使用 `scripts/start_service.sh` / `scripts/stop_service.sh` 和 `ASCEND_AGENT_HOME` 下日志，不再引用旧 `/tmp` 路径作为当前结论依据。
+
+### 关键证据
+- `git show --stat 5f0c1f9`
+- `git show --stat da00b33`
+- `curl -i http://127.0.0.1:8080/actuator/health`
+- `curl -i http://127.0.0.1:8080/actuator/info`
+- `scripts/start_service.sh`
+- `scripts/stop_service.sh`
+- `/root/ascend_agent/.ascend_agent/logs/service.log`
