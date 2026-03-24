@@ -1619,7 +1619,8 @@ P10 复验用户修正后的 MaaS 配置并完成第三批端到端验收收口
 - 用户修正 key 后，重新打包并重启到最新配置，服务当前以 PID `2912209` 稳定运行，`/actuator/health` 返回 `200`。
 - MaaS 直连已恢复：使用当前 `application.yml` 中的 `api-url/api-key/model/max-tokens` 直接调用远端 Chat Completions，返回 `HTTP 200`，说明鉴权与协议已打通。
 - 第三批硬错误路径验收通过：对 `POST /api/testcase/generate` 发送无 `referenceUrl` 的请求，系统返回 `HTTP 400`，错误码为 `TESTCASE_REFERENCE_URL_REQUIRED`，符合“KB 未命中且无 URL 直接报错”的拍板规则。
-- 第三批成功路径验收通过：对 `POST /api/testcase/generate` 发送带 `referenceUrl` 的请求，系统返回 `HTTP 200`，响应包含 `javaTestCode`、结构化 `citations`、`degraded=true`，符合当前 Batch 3 合同。
+- 第三批成功路径的**服务级验收**通过：对 `POST /api/testcase/generate` 发送带 `referenceUrl` 的请求，系统返回 `HTTP 200`，响应包含 `javaTestCode`、结构化 `citations`、`degraded=true`，符合当前 Batch 3 合同。
+- 第三批成功路径的**产物可执行性验收**本轮未通过：生成代码仍包含 `AUTH_TOKEN`、`PROJECT_ID` 占位符，且本机当前没有 Java 21 编译器（只有 Java 21 runtime），因此本轮没有完成“生成代码可直接编译并可对接真实认证后执行”的验证。
 
 ### 核心问题
 
@@ -1631,20 +1632,29 @@ P10 复验用户修正后的 MaaS 配置并完成第三批端到端验收收口
 - 当前知识库短路径仍存在结构化命中不足的问题：例如“创建工作流”能搜到结果，但部分结果缺少 `httpMethod/endpoint` 等字段，因此会被生成链路判为“非具体命中”，这会影响“纯 KB 命中直接生成”的成功率。
 - 该问题不阻塞当前第三批最小闭环，因为 `referenceUrl` 降级成功路径已可用，但它属于后续知识库数据质量治理项。
 
+#### P3
+- 当前生成代码只证明“LLM 能按上下文生成语法上像测试用例的 Java 文本”，还不能证明“它已经具备真实可运行性”。
+- 现有产物中仍有认证与项目标识占位符，且没有统一的鉴权注入协议、测试环境约束和执行级验收脚本，所以不能把 `HTTP 200` 直接表述成“生成用例可用”。
+
 ### 决策
-- 第三批端到端最小闭环本轮正式验收通过。
+- 第三批端到端最小闭环的**服务级目标**本轮正式验收通过。
+- 第三批端到端最小闭环的**产物可执行性目标**本轮不予放行，需单独补验。
 - 当前对外口径可以明确为：
   - 默认 `java` 已是 21
   - 服务可启动且健康
   - `POST /api/testcase/generate` 已具备硬错误返回与 `referenceUrl` 成功生成能力
+  - 但“生成出的 Java 用例已可直接使用”这一结论当前不能成立
 - 后续若继续提升第三批质量，优先级放在知识库元数据结构化补齐，而不是继续纠缠 Java 或 MaaS 基础接通问题。
 
 ### 行动项
 - 负责人：P10 将本条纪要提交并推送远端，作为本轮验收落点。
 - 负责人：后续若要提升“无 `referenceUrl` 也能直接生成”的命中率，执行层需要针对知识库元数据补齐 `httpMethod/endpoint/requestBody/responseBody` 等结构化字段。
+- 负责人：执行层下一步必须补一条新的验收链路：把生成代码落到临时测试工程中，用 Java 21 编译器做编译校验，并定义认证参数如何注入，之后才能评估“可用性”。
 
 ### 关键证据
 - 健康检查：`HTTP 200 /actuator/health`
 - MaaS 直连：`HTTP 200`，`glm-5` 返回合法 `choices[].message.content`
 - 无 `referenceUrl` 请求：`HTTP 400` + `TESTCASE_REFERENCE_URL_REQUIRED`
 - 带 `referenceUrl` 请求：`HTTP 200`，返回 `javaTestCode + citations + degraded`
+- 生成代码检查：包含 `AUTH_TOKEN` 与 `PROJECT_ID` 占位符
+- 本机工具链事实：存在 Java 21 runtime，但不存在 `javac 21`，因此本轮未完成 Java 21 下的生成产物编译验收
