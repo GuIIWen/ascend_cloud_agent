@@ -1301,3 +1301,65 @@ P10 验收 `WP3` 停止线固化与运行态异常修复，并确认可进入 `W
 - `scripts/start_service.sh`
 - `scripts/stop_service.sh`
 - `/root/ascend_agent/.ascend_agent/logs/service.log`
+
+## 2026-03-24 11:08:00 +0800
+
+### 主题
+P10 验收 `WP1` 契约收口与 `WP2` 弱一致降级，确认第二批对齐主线完成
+
+### 参与角色
+- P10 主线程：核主仓落地、做集成验收、记录最终结论
+- P9：负责 `WP1`、`WP2` 任务拆分与执行组织
+- P8：分别完成 `WP1` 两张卡与 `WP2` 两张卡并提交
+
+### 评审范围
+- `src/main/java/com/agent/controller/KnowledgeBaseController.java`
+- `src/main/java/com/agent/controller/KnowledgeBaseControllerAdvice.java`
+- `src/main/java/com/agent/model/error/ApiErrorResponse.java`
+- `src/main/java/com/agent/service/KnowledgeBaseServiceImpl.java`
+- `src/main/java/com/agent/storage/MetadataStore.java`
+- `src/main/java/com/agent/storage/VectorStoreAdapter.java`
+- `src/main/java/com/agent/parser/HuaweiCloudApiParser.java`
+- `src/main/java/com/agent/service/HuaweiCloudApiCrawlerService.java`
+- `src/test/java/com/agent/controller/KnowledgeBaseControllerTest.java`
+- `src/test/java/com/agent/controller/KnowledgeBaseControllerAdviceTest.java`
+- `src/test/java/com/agent/controller/KnowledgeBaseControllerRuntimeFailureTest.java`
+- `src/test/java/com/agent/service/KnowledgeBaseServiceImplWeakConsistencyTest.java`
+- `src/test/java/com/agent/parser/HuaweiCloudApiParserTest.java`
+- `src/test/java/com/agent/service/HuaweiCloudApiCrawlerServiceTest.java`
+
+### 统一结论
+- `WP1` 已验收通过：`/api/knowledge/*` 在不破坏成功响应字段语义的前提下，补上了统一错误体和最小参数校验；业务字段校验错误保持 `200 + 结构化 error body`，框架/传输层错误允许 `400/415 + 结构化 error body`。
+- 华为云目录页抓取已验收通过：仍严格保持一层下钻，只增强了链接规范化、去重、锚点/查询串清洗、无关链接过滤和空页容错，没有扩成多层爬取。
+- `WP2` 已验收通过：搜索链路在 metadata 缺失、metadata 查询异常、向量检索异常等场景下不再静默丢结果或直接抛到 controller；索引链路在单文件失败场景下保留准确 `failureCount` 并继续处理其余文件。
+- 第二批对齐主线已按 `WP3 -> WP1 -> WP2` 顺序完成，本轮没有越过红线引入主 Agent API、workflow/planner/executor 真实路径或新存储。
+
+### 核心问题
+
+#### P1
+- `WP2` 执行期间主线程在 agent 生命周期管理上再次出现失误：把“消息已发出”误判成“worker 已开始执行”，导致进度判断失真；此次验收以主仓 commit 和主仓验证结果为准，修正了这个口径问题。
+- `KnowledgeBaseServiceImpl` 原实现对 metadata 缺失/查询失败的向量命中会直接丢弃结果，本轮通过降级结果和日志把该风险收口为“弱一致可诊断”，而不是“静默缺失”。
+
+#### P2
+- 目标测试在当前环境需要使用 `-DforkCount=0`，否则 surefire 默认 fork 在本机环境不稳定；这属于测试环境约束，不是断言失败。
+- 工作区仍存在未跟踪目录 `task_cards/`，不属于本轮源码与验收提交范围，后续是否保留需单独决定。
+
+### 决策
+- 接受提交 `8559b40` `feat: harden knowledge api contract` 作为 `WP1` Card#1 完成交付。
+- 接受提交 `07af413` `fix(huawei-cloud): harden one-level directory crawl` 作为 `WP1` Card#2 完成交付。
+- 接受提交 `136e5bc` `feat: harden knowledge base weak consistency` 作为 `WP2` 产线改造交付。
+- 接受提交 `80dda8d` `test(wp2): cover weak consistency degradation paths` 作为 `WP2` 测试交付。
+- 第二批“对齐而非收编”任务到此完成；后续若继续推进，必须先由 P10 重新定义下一批目标，不能直接滑向主 Agent 收编。
+
+### 行动项
+- 负责人：P10 如需对外说明当前能力边界，统一引用 `/actuator/info` 与 `meeting.md`，不得把“第二批对齐完成”表述成“主 Agent 已上线”。
+- 负责人：后续若要继续做下一批工作，P9 需先提出新的任务包与边界，不得默认顺延到主 Agent 收编。
+- 负责人：`task_cards/` 是否纳入仓库管理单独决策，本轮先不计入验收结论。
+
+### 关键证据
+- `git show --stat 8559b40`
+- `git show --stat 07af413`
+- `git show --stat 136e5bc`
+- `git show --stat 80dda8d`
+- `mvn -q -DskipTests compile`
+- `mvn -q -DforkCount=0 -Dtest=KnowledgeBaseServiceImplWeakConsistencyTest,KnowledgeBaseControllerRuntimeFailureTest,KnowledgeBaseControllerTest,KnowledgeBaseControllerAdviceTest,HuaweiCloudApiParserTest,HuaweiCloudApiCrawlerServiceTest test`
