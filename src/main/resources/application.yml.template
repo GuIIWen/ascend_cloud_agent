@@ -4,6 +4,8 @@ server:
 spring:
   application:
     name: ${SPRING_APPLICATION_NAME:ascend-agent}
+  main:
+    register-shutdown-hook: ${SPRING_MAIN_REGISTER_SHUTDOWN_HOOK:false}
 
 management:
   endpoints:
