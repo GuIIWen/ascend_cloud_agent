@@ -6,6 +6,69 @@
 - 建议把最新记录放在文件最上方，便于事后快速查看。
 - 记录至少包含：时间、主题、范围、统一结论、问题分级、行动项、关键证据。
 
+## 2026-03-24 20:31:43 +0800
+
+### 主题
+Sprint-1 第七批交付验收：测试用例生成显式期望合同收口
+
+### 参与角色
+- P10 主线程：定义“不依赖用户立即给错误码”的收口范围并完成最终验收
+- P8 执行层：落地请求合同、入口校验、prompt 约束与定向单测
+
+### 评审范围
+- `src/main/java/com/agent/model/testcase/TestcaseGenerateRequest.java`
+- `src/main/java/com/agent/service/testcase/TestcaseGenerationRequest.java`
+- `src/main/java/com/agent/controller/TestcaseGenerationController.java`
+- `src/main/java/com/agent/service/testcase/TestcaseGenerationServiceImpl.java`
+- `src/main/java/com/agent/service/testcase/TestcasePromptBuilder.java`
+- `src/test/java/com/agent/controller/TestcaseGenerationControllerTest.java`
+- `src/test/java/com/agent/service/testcase/TestcaseGenerationServiceImplTest.java`
+- `src/test/java/com/agent/service/testcase/TestcasePromptBuilderTest.java`
+- `meeting.md`
+
+### 统一结论
+- 本轮交付已达到放行条件。
+- 测试用例生成入口已补齐两项可选显式期望：`expectedHttpStatus`、`expectedErrorCode`，后续用户明确错误码时不需要再改链路合同。
+- Controller 层已对 `expectedHttpStatus` 做 `100-599` 范围校验，并把空白 `expectedErrorCode` 归一化为 `null`。
+- Service 层已把显式期望透传到生成 prompt；prompt 已明确要求“显式期望优先、未提供且上下文不明确时禁止臆造具体状态码/错误码”。
+- 当前通过口径是“合同与约束收口通过”，不是“真实错误码执行验收通过”。
+
+### 验收结果
+- 代码级验收
+  - 结果：通过；P8 提交已真实落到主仓，提交为 `afcc152`、`5e52ce1`
+- `mvn -q -Dtest=TestcaseGenerationControllerTest,TestcaseGenerationServiceImplTest,TestcasePromptBuilderTest test`
+  - 结果：通过
+- `mvn -q -DskipTests package`
+  - 结果：通过
+- 验收点核对
+  - request model 已支持 `expectedHttpStatus`、`expectedErrorCode`
+  - controller 已覆盖非法 `expectedHttpStatus` 的 `400` 拒绝
+  - blank `expectedErrorCode` 已归一化为 `null`
+  - prompt 已包含显式期望，并包含“未提供时不要臆造”的约束
+  - service 已把显式期望透传给生成 prompt
+
+### 核心问题
+
+#### P1
+- 当前只是把“用户显式给值时如何约束模型”这层合同补齐，还没有在生成后代码检查层强制校验“生成结果是否真的使用了显式期望”；这一层仍依赖模型遵守 prompt。
+
+#### P2
+- 本轮没有做 HTTP 接口级 E2E 回归，因此不能把这次放行表述成“真实错误码场景已验证通过”；当前准确口径仍然是“合同层、单测层、打包层通过”。
+
+### 决策
+- 以后异常类测试用例生成优先接受用户显式提供的 `expectedHttpStatus` / `expectedErrorCode`，不再把具体错误码交给模型猜。
+- 在用户明确错误码之前，当前链路先保持“合同已备好、生成约束已收口”的状态，不提前冻结具体断言值。
+
+### 行动项
+- P10：对本轮放行结果做结论输出，并把纪要纳入历史记录。
+- 后续执行层：在用户给出明确错误码后，补做真实执行级验收，并视结果决定是否追加生成后代码级强校验。
+
+### 关键证据
+- `git log --oneline -2`
+- `src/test/java/com/agent/controller/TestcaseGenerationControllerTest.java`
+- `src/test/java/com/agent/service/testcase/TestcaseGenerationServiceImplTest.java`
+- `src/test/java/com/agent/service/testcase/TestcasePromptBuilderTest.java`
+
 ## 2026-03-24 20:02:55 +0800
 
 ### 主题
