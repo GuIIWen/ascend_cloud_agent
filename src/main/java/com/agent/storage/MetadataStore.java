@@ -2,6 +2,8 @@ package com.agent.storage;
 
 import com.agent.model.ApiMetadata;
 import com.agent.model.DocumentSourceType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.sql.*;
 import java.util.ArrayList;
@@ -11,6 +13,8 @@ import java.util.List;
  * 元数据存储 - 基于SQLite
  */
 public class MetadataStore {
+    private static final Logger logger = LoggerFactory.getLogger(MetadataStore.class);
+
     private final String dbPath;
     private Connection connection;
 
@@ -100,18 +104,31 @@ public class MetadataStore {
     }
 
     private ApiMetadata mapResultSet(ResultSet rs) throws SQLException {
+        String sourceTypeValue = rs.getString("source_type");
         return ApiMetadata.builder()
                 .apiId(rs.getString("api_id"))
                 .className(rs.getString("class_name"))
                 .methodName(rs.getString("method_name"))
                 .signature(rs.getString("signature"))
                 .description(rs.getString("description"))
-                .sourceType(DocumentSourceType.valueOf(rs.getString("source_type")))
+                .sourceType(parseSourceType(sourceTypeValue))
                 .sourceLocation(rs.getString("source_location"))
                 .returnType(rs.getString("return_type"))
                 .httpMethod(rs.getString("http_method"))
                 .endpoint(rs.getString("endpoint"))
                 .build();
+    }
+
+    private DocumentSourceType parseSourceType(String sourceTypeValue) {
+        if (sourceTypeValue == null || sourceTypeValue.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            return DocumentSourceType.valueOf(sourceTypeValue);
+        } catch (IllegalArgumentException e) {
+            logger.warn("Unknown source_type '{}' found in metadata store, degrading to null", sourceTypeValue);
+            return null;
+        }
     }
 
     public void close() throws SQLException {
