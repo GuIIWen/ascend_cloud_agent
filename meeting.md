@@ -1556,3 +1556,48 @@ P10 验收第三批最小生成闭环，并补运行态复核结论
 - 健康检查：`curl -i http://127.0.0.1:8080/actuator/health`
 - 运行态信息：`curl http://127.0.0.1:8080/actuator/info`
 - 本地有效 JSON 请求返回：`500 / INTERNAL_ERROR`，根因 `IllegalStateException`（LLM provider disabled）
+
+## 2026-03-24 15:15:45 +0800
+
+### 主题
+P10 复验 Java 21 默认版本与第三批运行态生成链路，定位剩余阻塞到 MaaS 鉴权
+
+### 参与角色
+- P10 主线程：复验、运行态定位、纪要收口
+- 执行层：修默认 Java 版本并配合重启验证
+
+### 评审范围
+- 默认 `java` 是否已真正切到 Java 21
+- 第三批服务在最新本地配置下是否可重包、重启、通过基础健康检查
+- `POST /api/testcase/generate` 当前失败点是否仍在本地实现，还是已外移到远端 LLM
+
+### 统一结论
+- 默认 `java` 已切换到 Java 21，`java -version` 返回 `21.0.10`，默认命中路径为 `/usr/lib/jvm/java-21-openjdk-amd64/bin/java`。
+- 第三批在 Java 21 下再次通过 `compile`、`package`、定向 `test`，服务以 PID `2905579` 成功启动，`/actuator/health` 返回 `200`，`/actuator/info` 继续暴露 `"/api/testcase/generate"`。
+- 当前 `POST /api/testcase/generate` 仍返回 `500 / INTERNAL_ERROR`，但失败性质已变化：不再是本地 `DisabledLLMService` 或 Java 版本问题，而是远端 MaaS LLM 调用返回 `401`。
+- 直接探测配置中的 MaaS Chat Completions 端点后，返回了 `ModelArts.81003 / Invalid authorization header`；因此当前阻塞已明确收敛到 MaaS 鉴权配置，而不是第三批本地代码链路。
+
+### 核心问题
+
+#### P1
+- 当前本地代码只支持 `knowledge-base.llm.provider=custom` 或 `none`；运行态已按此收正。
+- 但即便使用 `custom + v2/chat/completions`，远端仍明确返回 `401`，说明现有 `api-key` 不被目标端点接受。
+
+#### P2
+- 第三批生成链路已经走到远端 LLM 请求阶段，本地实现链路已经打通。
+- 因此后续再出现 `500`，优先排查 MaaS `api-key`、账号权限、端点区域与接口协议，而不应再回头归因为 Java 8 或本地 Spring 配置未生效。
+
+### 决策
+- Java 21 默认版本问题本轮验收通过，后续不再接受“只是启动脚本内部用了 21”这种口径。
+- 第三批本地实现与运行态装配问题本轮验收通过。
+- 当前唯一剩余阻塞定义为：`knowledge-base.llm.api-key` 对 `https://api.modelarts-maas.com/v2/chat/completions` 鉴权失败，需要用户更换或核对有效的 MaaS API Key。
+
+### 行动项
+- 负责人：P10 在用户提供或修正有效 MaaS API Key 后，立即复跑 `/api/testcase/generate` 真实请求并补最终验收结论。
+- 负责人：执行层后续若继续接入其他 LLM 供应商，必须先在直连 `curl` 层验证鉴权与协议，再接回应用链路，避免把外部鉴权错误包成应用内不透明 `500`。
+
+### 关键证据
+- `java -version`：`openjdk version "21.0.10" 2026-01-20`
+- 默认 Java 路径：`/usr/lib/jvm/java-21-openjdk-amd64/bin/java`
+- 真实生成请求返回：`500 / INTERNAL_ERROR`，错误类型 `RuntimeException`
+- 直连 MaaS 端点返回：`401 / ModelArts.81003 / Invalid authorization header`
