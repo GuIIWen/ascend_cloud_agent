@@ -8,6 +8,8 @@ import com.agent.service.KnowledgeBaseService;
 import com.agent.service.KnowledgeBaseServiceImpl;
 import com.agent.service.LLMService;
 import com.agent.service.RerankService;
+import com.agent.service.testcase.TestcaseGenerationService;
+import com.agent.service.testcase.TestcaseGenerationServiceImpl;
 import com.agent.service.impl.DisabledLLMService;
 import com.agent.service.impl.DisabledRerankService;
 import com.agent.service.impl.HttpChatCompletionsLLMService;
@@ -31,8 +33,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
-import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -70,7 +72,7 @@ public class AppConfig {
             details.put("entrypoint", agentConfig.effectiveEntrypoint());
             details.put("zeroInteractionEnabled", agentConfig.isZeroInteractionEnabled());
             details.put("orchestrationEnabled", agentConfig.isOrchestrationEnabled());
-            details.put("allowedEndpoints", Collections.singletonList("/api/knowledge/*"));
+            details.put("allowedEndpoints", List.of("/api/knowledge/*", "/api/testcase/generate"));
             Map<String, Object> stopline = new LinkedHashMap<>();
             stopline.put("active", true);
             stopline.put("policy", "alignment-only");
@@ -237,5 +239,19 @@ public class AppConfig {
                 vectorStoreAdapter,
                 metadataStore,
                 embeddingModel);
+    }
+
+    @Bean
+    public TestcaseGenerationService testcaseGenerationService(
+            KnowledgeBaseConfig config,
+            KnowledgeBaseService knowledgeBaseService,
+            LLMService llmService,
+            WebDocumentCrawler webDocumentCrawler) {
+        int topK = config.getRerank() != null ? config.getRerank().getTopK() : 5;
+        return new TestcaseGenerationServiceImpl(
+                knowledgeBaseService,
+                llmService,
+                webDocumentCrawler,
+                topK);
     }
 }
