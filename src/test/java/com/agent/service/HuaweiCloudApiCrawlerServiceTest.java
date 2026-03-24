@@ -17,8 +17,10 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -84,5 +86,51 @@ class HuaweiCloudApiCrawlerServiceTest {
                 savedApis.stream().map(ApiMetadata::getMethodName).toList());
         assertTrue(savedApis.stream().anyMatch(api -> listUrl.equals(api.getSourceLocation())));
         assertTrue(savedApis.stream().anyMatch(api -> createUrl.equals(api.getSourceLocation())));
+    }
+
+    @Test
+    void skipsInvalidAndDuplicateDetailLinksWithoutRecursingBeyondOneLevel() throws IOException, SQLException {
+        String directoryUrl = "https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html";
+        String listUrl = "https://support.huaweicloud.com/api-modelarts/ListWorkflows.html";
+        String createUrl = "https://support.huaweicloud.com/api-modelarts/CreateWorkflow.html";
+        String nestedUrl = "https://support.huaweicloud.com/api-modelarts/DeleteWorkflow.html";
+
+        when(webCrawler.fetchHtml(directoryUrl)).thenReturn("""
+                <html><body>
+                  <a href="ListWorkflows.html">ListWorkflows</a>
+                  <a href="ListWorkflows.html#overview">ListWorkflows duplicate</a>
+                  <a href="/api-modelarts/CreateWorkflow.html?locale=zh-cn">CreateWorkflow</a>
+                  <a href="modelarts_03_0003.html">ignore directory</a>
+                  <a href="https://support.huaweicloud.com/other-service/ListJobs.html">ignore service</a>
+                </body></html>
+                """);
+        when(webCrawler.fetchHtml(listUrl)).thenReturn("""
+                <html><head><title>获取Workflow工作流列表 - ListWorkflows</title></head><body><article>
+                  <h4>URI</h4>
+                  <p>GET /v2/{project_id}/workflows</p>
+                  <a href="DeleteWorkflow.html">nested child that must not be crawled</a>
+                </article></body></html>
+                """);
+        when(webCrawler.fetchHtml(createUrl)).thenReturn("""
+                <html><body>   </body></html>
+                """);
+        doNothing().when(metadataStore).save(any(ApiMetadata.class));
+
+        HuaweiCloudApiCrawlerService service = new HuaweiCloudApiCrawlerService(
+                webCrawler,
+                parser,
+                metadataStore,
+                documentProcessor);
+
+        HuaweiCloudApiCrawlerService.CrawlResult result = service.crawlAndIndex(directoryUrl);
+
+        assertEquals(1, result.getSuccessCount());
+        assertEquals(1, result.getFailureCount());
+        assertTrue(result.getErrors().stream().anyMatch(error -> error.contains(createUrl)));
+        verify(webCrawler, times(1)).fetchHtml(listUrl);
+        verify(webCrawler, times(1)).fetchHtml(createUrl);
+        verify(webCrawler, never()).fetchHtml(eq(nestedUrl));
+        verify(metadataStore, times(1)).save(any(ApiMetadata.class));
+        verify(documentProcessor, times(1)).processAndStore(any());
     }
 }

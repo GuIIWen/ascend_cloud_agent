@@ -64,6 +64,9 @@ public class HuaweiCloudApiCrawlerService {
                         ApiMetadata api = apiParser.parseApiDetail(detailHtml, detailUrl, null);
                         if (api != null) {
                             apis.add(api);
+                        } else {
+                            logger.warn("Failed to parse detail page: {}", detailUrl);
+                            errors.add("Failed to parse detail page: " + detailUrl);
                         }
                     } catch (IOException e) {
                         logger.warn("Failed to crawl detail page: {}", detailUrl, e);
