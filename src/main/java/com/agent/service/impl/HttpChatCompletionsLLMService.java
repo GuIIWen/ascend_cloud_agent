@@ -1,6 +1,7 @@
 package com.agent.service.impl;
 
 import com.agent.config.KnowledgeBaseConfig;
+import com.agent.service.LLMPromptMarkers;
 import com.agent.service.LLMService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.MediaType;
@@ -8,6 +9,8 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;
@@ -21,6 +24,9 @@ import java.util.concurrent.TimeUnit;
 public class HttpChatCompletionsLLMService implements LLMService {
 
     private static final MediaType JSON = MediaType.parse("application/json");
+    private static final Logger logger = LoggerFactory.getLogger(HttpChatCompletionsLLMService.class);
+    private static final int REFINEMENT_MAX_TOKENS = 512;
+    private static final int TESTCASE_GENERATION_MAX_TOKENS = 1536;
 
     private final KnowledgeBaseConfig.LlmConfig config;
     private final OkHttpClient client;
@@ -42,12 +48,15 @@ public class HttpChatCompletionsLLMService implements LLMService {
     @Override
     public String generateTestCode(String prompt) {
         validateConfig();
+        String promptMode = detectPromptMode(prompt);
+        String requestPrompt = stripPromptMarkers(prompt);
+        int maxTokens = resolveMaxTokens(promptMode);
 
         Map<String, Object> requestBody = new LinkedHashMap<>();
         requestBody.put("model", config.getModel());
         requestBody.put("temperature", config.getTemperature());
-        requestBody.put("max_tokens", config.getMaxTokens());
-        requestBody.put("messages", List.of(Map.of("role", "user", "content", prompt)));
+        requestBody.put("max_tokens", maxTokens);
+        requestBody.put("messages", List.of(Map.of("role", "user", "content", requestPrompt)));
 
         Request.Builder builder = new Request.Builder()
                 .url(config.getApiUrl())
@@ -57,8 +66,11 @@ public class HttpChatCompletionsLLMService implements LLMService {
             builder.header("Authorization", "Bearer " + config.getApiKey());
         }
 
+        long startNanos = System.nanoTime();
         try (Response response = client.newCall(builder.build()).execute()) {
             String body = response.body() != null ? response.body().string() : "";
+            logger.info("LLM request completed: mode={} status={} maxTokens={} elapsedMs={}",
+                    promptMode, response.code(), maxTokens, elapsedMillis(startNanos));
             if (!response.isSuccessful()) {
                 throw new RuntimeException("LLM request failed: HTTP " + response.code() + " body=" + body);
             }
@@ -86,6 +98,8 @@ public class HttpChatCompletionsLLMService implements LLMService {
 
             return text;
         } catch (IOException e) {
+            logger.warn("LLM request failed: mode={} maxTokens={} elapsedMs={}",
+                    promptMode, maxTokens, elapsedMillis(startNanos), e);
             throw new RuntimeException("LLM request failed", e);
         }
     }
@@ -118,5 +132,42 @@ public class HttpChatCompletionsLLMService implements LLMService {
 
     private static boolean hasText(String value) {
         return value != null && !value.trim().isEmpty();
+    }
+
+    private String detectPromptMode(String prompt) {
+        if (prompt == null) {
+            return "default";
+        }
+        if (prompt.startsWith(LLMPromptMarkers.REQUIREMENT_REFINEMENT)) {
+            return LLMPromptMarkers.REQUIREMENT_REFINEMENT;
+        }
+        if (prompt.startsWith(LLMPromptMarkers.TESTCASE_GENERATION)) {
+            return LLMPromptMarkers.TESTCASE_GENERATION;
+        }
+        return "default";
+    }
+
+    private String stripPromptMarkers(String prompt) {
+        if (!hasText(prompt)) {
+            return prompt;
+        }
+        return prompt
+                .replaceFirst("^" + java.util.regex.Pattern.quote(LLMPromptMarkers.REQUIREMENT_REFINEMENT) + "\\s*", "")
+                .replaceFirst("^" + java.util.regex.Pattern.quote(LLMPromptMarkers.TESTCASE_GENERATION) + "\\s*", "");
+    }
+
+    private int resolveMaxTokens(String promptMode) {
+        int configured = Math.max(1, config.getMaxTokens());
+        if (LLMPromptMarkers.REQUIREMENT_REFINEMENT.equals(promptMode)) {
+            return Math.min(configured, REFINEMENT_MAX_TOKENS);
+        }
+        if (LLMPromptMarkers.TESTCASE_GENERATION.equals(promptMode)) {
+            return Math.min(configured, TESTCASE_GENERATION_MAX_TOKENS);
+        }
+        return configured;
+    }
+
+    private long elapsedMillis(long startNanos) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
     }
 }

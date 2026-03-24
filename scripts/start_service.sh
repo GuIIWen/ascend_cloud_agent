@@ -33,6 +33,10 @@ resolve_java_bin() {
     candidate="$JAVA_HOME_CANDIDATE/bin/java"
   fi
 
+  if [[ -n "$candidate" ]] && command -v readlink >/dev/null 2>&1; then
+    candidate="$(readlink -f "$candidate" 2>/dev/null || printf '%s' "$candidate")"
+  fi
+
   if [[ ! -x "$candidate" ]]; then
     candidate=""
   else
@@ -40,6 +44,10 @@ resolve_java_bin() {
     if [[ -z "$candidate_major" || "$candidate_major" -lt 21 ]]; then
       candidate=""
     fi
+  fi
+
+  if [[ -n "$fallback" ]] && command -v readlink >/dev/null 2>&1; then
+    fallback="$(readlink -f "$fallback" 2>/dev/null || printf '%s' "$fallback")"
   fi
 
   if [[ -z "$candidate" && -x "$fallback" ]]; then

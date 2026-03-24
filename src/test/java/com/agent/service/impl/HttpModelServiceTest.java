@@ -1,6 +1,7 @@
 package com.agent.service.impl;
 
 import com.agent.config.KnowledgeBaseConfig;
+import com.agent.service.LLMPromptMarkers;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.segment.TextSegment;
 import okhttp3.MediaType;
@@ -68,6 +69,30 @@ class HttpModelServiceTest {
         assertTrue(observedBody.toString().contains("\"model\":\"qwen-test\""));
         assertTrue(observedBody.toString().contains("\"max_tokens\":128"));
         assertTrue(observedBody.toString().contains("\"content\":\"write test\""));
+    }
+
+    @Test
+    void llmServiceCapsMaxTokensForTaggedPrompts() {
+        StringBuilder observedBody = new StringBuilder();
+        OkHttpClient client = clientResponding(
+                "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"优化后的需求\"}}]}",
+                observedBody);
+
+        KnowledgeBaseConfig.LlmConfig config = new KnowledgeBaseConfig.LlmConfig();
+        config.setProvider("custom");
+        config.setApiUrl("http://llm.test/v1/chat/completions");
+        config.setModel("glm-test");
+        config.setMaxTokens(4096);
+        config.setTemperature(0.2);
+
+        HttpChatCompletionsLLMService service =
+                new HttpChatCompletionsLLMService(config, client, new ObjectMapper());
+
+        String result = service.generateTestCode(LLMPromptMarkers.REQUIREMENT_REFINEMENT + "\n请优化需求");
+
+        assertEquals("优化后的需求", result);
+        assertTrue(observedBody.toString().contains("\"max_tokens\":512"));
+        assertTrue(observedBody.toString().contains("\"content\":\"请优化需求\""));
     }
 
     @Test

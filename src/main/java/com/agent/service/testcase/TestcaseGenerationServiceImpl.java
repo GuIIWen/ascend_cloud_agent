@@ -28,13 +28,20 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
     private final LLMService llmService;
     private final WebDocumentCrawler webDocumentCrawler;
     private final TestcasePromptBuilder promptBuilder;
+    private final GeneratedTestcasePostProcessor generatedTestcasePostProcessor;
     private final int topK;
 
     public TestcaseGenerationServiceImpl(
             KnowledgeBaseService knowledgeBaseService,
             LLMService llmService,
             WebDocumentCrawler webDocumentCrawler) {
-        this(knowledgeBaseService, llmService, webDocumentCrawler, new TestcasePromptBuilder(), DEFAULT_TOP_K);
+        this(
+                knowledgeBaseService,
+                llmService,
+                webDocumentCrawler,
+                new TestcasePromptBuilder(),
+                new GeneratedTestcasePostProcessor(),
+                DEFAULT_TOP_K);
     }
 
     public TestcaseGenerationServiceImpl(
@@ -42,7 +49,13 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
             LLMService llmService,
             WebDocumentCrawler webDocumentCrawler,
             int topK) {
-        this(knowledgeBaseService, llmService, webDocumentCrawler, new TestcasePromptBuilder(), topK);
+        this(
+                knowledgeBaseService,
+                llmService,
+                webDocumentCrawler,
+                new TestcasePromptBuilder(),
+                new GeneratedTestcasePostProcessor(),
+                topK);
     }
 
     TestcaseGenerationServiceImpl(
@@ -50,11 +63,14 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
             LLMService llmService,
             WebDocumentCrawler webDocumentCrawler,
             TestcasePromptBuilder promptBuilder,
+            GeneratedTestcasePostProcessor generatedTestcasePostProcessor,
             int topK) {
         this.knowledgeBaseService = Objects.requireNonNull(knowledgeBaseService, "knowledgeBaseService");
         this.llmService = Objects.requireNonNull(llmService, "llmService");
         this.webDocumentCrawler = Objects.requireNonNull(webDocumentCrawler, "webDocumentCrawler");
         this.promptBuilder = Objects.requireNonNull(promptBuilder, "promptBuilder");
+        this.generatedTestcasePostProcessor =
+                Objects.requireNonNull(generatedTestcasePostProcessor, "generatedTestcasePostProcessor");
         this.topK = topK > 0 ? topK : DEFAULT_TOP_K;
     }
 
@@ -69,10 +85,21 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
             throw new IllegalArgumentException("requirement must not be blank");
         }
         String referenceUrl = normalize(request.getReferenceUrl());
+        List<ApiMetadata> rawKnowledgeBaseHits = List.of();
+
+        if (!hasText(referenceUrl)) {
+            rawKnowledgeBaseHits = filterKnowledgeBaseHits(knowledgeBaseService.search(requirement, topK));
+            if (rawKnowledgeBaseHits.isEmpty()) {
+                throw new TestcaseReferenceUrlRequiredException();
+            }
+        }
 
         String refinedRequirement = refineRequirement(requirement);
         List<ApiMetadata> searchResults = knowledgeBaseService.search(refinedRequirement, topK);
         List<ApiMetadata> effectiveKbResults = filterKnowledgeBaseHits(searchResults);
+        if (effectiveKbResults.isEmpty() && !rawKnowledgeBaseHits.isEmpty()) {
+            effectiveKbResults = rawKnowledgeBaseHits;
+        }
 
         boolean degraded;
         String context;
@@ -99,6 +126,7 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
         if (!hasText(javaTestCode)) {
             throw new IllegalStateException("LLM returned empty testcase code");
         }
+        javaTestCode = generatedTestcasePostProcessor.process(javaTestCode);
 
         return new TestcaseGenerationResult(javaTestCode, dedupeCitations(citations), degraded);
     }

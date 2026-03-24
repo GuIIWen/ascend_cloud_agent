@@ -6,6 +6,141 @@
 - 建议把最新记录放在文件最上方，便于事后快速查看。
 - 记录至少包含：时间、主题、范围、统一结论、问题分级、行动项、关键证据。
 
+## 2026-03-24 20:02:55 +0800
+
+### 主题
+Sprint-1 第六批最终验收：测试用例生成真实闭环跑通
+
+### 参与角色
+- P10 主线程：以“可回包、可编译、可追溯”为唯一放行标准完成最终验收
+
+### 评审范围
+- `scripts/start_service.sh`
+- `src/main/java/com/agent/service/LLMPromptMarkers.java`
+- `src/main/java/com/agent/service/impl/HttpChatCompletionsLLMService.java`
+- `src/main/java/com/agent/service/testcase/GeneratedTestcasePostProcessor.java`
+- `src/main/java/com/agent/service/testcase/TestcaseGenerationServiceImpl.java`
+- `src/main/java/com/agent/service/testcase/TestcasePromptBuilder.java`
+- `src/test/java/com/agent/service/impl/HttpModelServiceTest.java`
+- `src/test/java/com/agent/service/testcase/GeneratedTestcasePostProcessorTest.java`
+- `src/test/java/com/agent/service/testcase/TestcaseGenerationServiceImplTest.java`
+- `meeting.md`
+
+### 统一结论
+- 当前服务已经按 Java 21 真实路径运行，`8080` 常驻进程不再显示为历史 Java 8 软链路径。
+- 无 `referenceUrl` 的失败路径已收口为“先查知识库，未命中即直返 400”，不再被 LLM 调用拖到超时。
+- 有 `referenceUrl` 的成功路径已经在真实运行态下返回 `HTTP 200`，并完成 Java 21 编译验证，达到本轮“通过”标准。
+- LLM 调用链已按任务类型收口 token 上限：需求优化走 512，代码生成走 1536，避免两次 4096 叠加导致接口长时间无响应。
+- 生成结果已增加语法解析、占位符重写与 TODO/placeholder 拦截，当前返回代码无伪造凭证占位符。
+
+### 验收结果
+- `mvn -q -Dtest=HttpModelServiceTest,GeneratedTestcasePostProcessorTest,TestcaseGenerationServiceImplTest,TestcaseGenerationControllerTest,TestcaseGenerationControllerAdviceTest test`
+  - 结果：通过
+- `mvn -q -DskipTests package`
+  - 结果：通过
+- `bash scripts/start_service.sh`
+  - 结果：通过；当前常驻进程 PID `3024796`
+- 运行态核验
+  - `ps -p 3024796 -o pid=,lstart=,args=`
+  - 结果：Java 启动路径为 `/usr/lib/jvm/java-21-openjdk-amd64/bin/java`
+- 健康检查
+  - `curl -sS -i -m 10 http://127.0.0.1:8080/actuator/health`
+  - 结果：`HTTP 200`
+- 失败路径验收
+  - `POST /api/testcase/generate` 仅传 `requirement`
+  - 结果：`HTTP 400`，错误码 `TESTCASE_REFERENCE_URL_REQUIRED`
+- 成功路径验收
+  - `POST /api/testcase/generate` 传 `requirement + referenceUrl=https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html`
+  - 结果：`HTTP 200`
+- 生成结果静态检查
+  - 结果：`has_placeholder=0`、`has_auth_env=1`、`has_project_env=1`、`degraded=true`
+- Java 21 实编译验证
+  - 结果：按生成类名落盘后 `javac_exit=0`
+- LLM 真实耗时
+  - 需求优化：`elapsedMs=48366`
+  - 代码生成：`elapsedMs=119833`
+
+### 核心问题
+
+#### P1
+- 当前知识库向量命中仍存在“只命中 apiId、取不回完整 metadata”的退化结果，导致主链路经常落到 `referenceUrl` 降级模式；这次虽然已通过，但知识库命中质量仍是后续必须治理的主问题。
+
+#### P2
+- 远端 LLM 实际耗时仍然偏高，只是本轮通过调用层 token 限制把总耗时压回到接口可接受区间；如果后续 prompt 继续膨胀或模型切换，仍可能再次逼近超时边界。
+
+### 决策
+- 测试用例生成链路以后统一按“400 明确失败 + 200 返回代码可编译”验收，不再接受单纯 `HTTP 200` 作为成功口径。
+- 任务类型感知的 token 上限保留在服务端实现层，不要求用户每次手工调配置试错。
+
+### 行动项
+- P10：提交并推送本轮最终收口代码与会议纪要。
+- 后续执行层：专项治理知识库 metadata 缺失和向量命中退化问题。
+
+### 关键证据
+- `.ascend_agent/logs/service.log`
+- `/tmp/testcase_success.out`
+- `/tmp/DeleteNonExistentWorkflowTest.java`
+
+## 2026-03-24 19:34:36 +0800
+
+### 主题
+Sprint-1 第六批交付验收：测试用例生成链路按“可用结果”收口
+
+### 参与角色
+- P10 主线程：以“生成结果可编译可使用”为最终放行标准完成验收
+
+### 评审范围
+- `src/main/java/com/agent/service/testcase/GeneratedTestcasePostProcessor.java`
+- `src/main/java/com/agent/service/testcase/TestcaseGenerationServiceImpl.java`
+- `src/main/java/com/agent/service/testcase/TestcasePromptBuilder.java`
+- `src/test/java/com/agent/service/testcase/GeneratedTestcasePostProcessorTest.java`
+- `src/test/java/com/agent/service/testcase/TestcaseGenerationServiceImplTest.java`
+- `meeting.md`
+
+### 统一结论
+- 测试用例生成链路的验收标准从“HTTP 200”升级为“返回的 Java 测试代码可落地使用”。
+- 当前主链路已补齐最小可交付收口：LLM 输出会经过语法解析、常见凭证占位符重写、TODO/placeholder 拦截，再返回给调用方。
+- 当知识库无命中且用户未提供 `referenceUrl` 时，服务会明确返回 `TESTCASE_REFERENCE_URL_REQUIRED`，不再在缺少接口上下文时硬生成错误代码。
+- 在提供参考链接的降级路径上，当前生成结果已验证为无占位符、通过 Java 21 实编译，达到本轮放行条件。
+
+### 验收结果
+- `mvn -q -Dtest=GeneratedTestcasePostProcessorTest,TestcaseGenerationServiceImplTest,TestcaseGenerationControllerTest,TestcaseGenerationControllerAdviceTest test`
+  - 结果：通过
+- `POST /api/testcase/generate`，仅传 `requirement`
+  - 结果：`HTTP 400`，错误码 `TESTCASE_REFERENCE_URL_REQUIRED`
+- `POST /api/testcase/generate`，传 `requirement + referenceUrl=https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html`
+  - 结果：`HTTP 200`，返回 Java 测试类代码，`degraded=true`
+- 生成结果静态检查
+  - 结果：`has_placeholder=0`、`has_auth_env=2`、`has_project_env=2`
+- Java 21 实编译验证
+  - 结果：`javac_exit=0`
+- 运行态健康检查
+  - `curl -sS -i -m 10 http://127.0.0.1:8080/actuator/health`
+  - 结果：通过
+
+### 核心问题
+
+#### P1
+- 旧链路只证明“模型能返回字符串”，没有证明返回内容能被项目实际消费；如果不做后处理和编译级验收，测试代码很容易夹带 TODO、假 token 或 projectId 占位符，形成伪成功。
+
+#### P2
+- 当前“通过”口径仍是编译级可用，不包含携带真实华为云凭证执行远端接口；这一层需要后续单独建设可控的集成测试环境与密钥注入机制，不能和当前生成功能验收混为一谈。
+
+### 决策
+- 以后测试用例生成链路的默认验收口径统一为：失败路径明确报错，成功路径返回的 Java 代码至少要通过占位符校验和 Java 21 编译验证。
+- 若知识库无命中且未提供 `referenceUrl`，直接报错并要求补充链接，不允许生成猜测性代码。
+
+### 行动项
+- P10：提交并推送本轮“可用结果收口”代码与会议纪要。
+- 后续执行层：继续推进知识库命中率与真实集成测试环境建设，但不阻塞本轮交付。
+
+### 关键证据
+- `src/main/java/com/agent/service/testcase/GeneratedTestcasePostProcessor.java`
+- `src/main/java/com/agent/service/testcase/TestcaseGenerationServiceImpl.java`
+- `src/main/java/com/agent/service/testcase/TestcasePromptBuilder.java`
+- `src/test/java/com/agent/service/testcase/GeneratedTestcasePostProcessorTest.java`
+- `src/test/java/com/agent/service/testcase/TestcaseGenerationServiceImplTest.java`
+
 ## 2026-03-24 09:35:11 +0800
 
 ### 主题
@@ -1658,3 +1793,58 @@ P10 复验用户修正后的 MaaS 配置并完成第三批端到端验收收口
 - 带 `referenceUrl` 请求：`HTTP 200`，返回 `javaTestCode + citations + degraded`
 - 生成代码检查：包含 `AUTH_TOKEN` 与 `PROJECT_ID` 占位符
 - 本机工具链事实：存在 Java 21 runtime，但不存在 `javac 21`，因此本轮未完成 Java 21 下的生成产物编译验收
+
+## 2026-03-24 19:27:28 +0800
+
+### 主题
+P10 补齐生成产物可用性验收，收口到“无占位符 + Java 21 真编译通过”
+
+### 参与角色
+- P10 主线程：代码收口、运行态复验、产物可用性验收
+
+### 评审范围
+- 生成产物是否仍含鉴权/项目标识占位符
+- 生成产物是否能通过 Java 21 编译器真实编译
+- 默认 `javac` 是否也已对齐到 Java 21
+
+### 统一结论
+- 第三批生成链路已增加产物后处理与语法校验：服务现在会对 LLM 生成结果做占位符收口、运行参数注入规范化，并对最终 Java 代码做解析验证。
+- 最新真实请求结果已经满足三条硬条件：
+  - `HTTP 200`
+  - 返回代码中 `placeholder/TODO` 数量为 `0`
+  - 返回代码中已改为通过 `HUAWEICLOUD_AUTH_TOKEN`、`HUAWEICLOUD_PROJECT_ID` 等运行参数注入，不再伪造默认认证值
+- 对服务返回的最新 `DeleteWorkflowNotFoundTest.java` 做 Java 21 真实编译，`javac_exit=0`，说明产物至少在语法与依赖层面可编译。
+- 默认 `javac` 也已对齐到 Java 21，`javac -version` 返回 `21.0.10`。
+
+### 核心问题
+
+#### P1
+- 之前的问题不是单一接口错误，而是“LLM 能生成文本，但系统没有对产物可交付性做最后一道收口”。
+- 这导致服务可以返回 `200`，但产物里仍含 `AUTH_TOKEN`、`PROJECT_ID` 等占位符，口径上容易误判为“可用”。
+
+#### P2
+- 通过在服务端补后处理与校验，当前系统至少能保证：
+  - 不返回明显占位符
+  - 不返回 `TODO`
+  - 返回的 Java 文本可通过 Java 21 编译器编译
+
+### 决策
+- 第三批本轮按“服务级 + 产物编译级”双层口径放行。
+- 当前可以对外确认的结果升级为：
+  - 服务链路通过
+  - 错误路径通过
+  - `referenceUrl` 成功路径通过
+  - 返回的 Java 用例无占位符，且可被 Java 21 编译
+- 后续如果要再往上提一个层级，才是“带真实认证参数执行集成测试”。那是下一阶段，不再影响本轮通过结论。
+
+### 行动项
+- 负责人：P10 提交本轮代码与纪要，并推送远端。
+- 负责人：后续若继续提升质量，增加“真实凭证注入后的集成执行”验收，而不是再回头争论当前最小闭环是否成立。
+
+### 关键证据
+- 无 `referenceUrl`：`HTTP 400` + `TESTCASE_REFERENCE_URL_REQUIRED`
+- 带 `referenceUrl`：`HTTP 200`
+- 产物检查：`has_placeholder=0`
+- 运行参数注入：`has_auth_env=2`、`has_project_env=2`
+- 编译结果：`javac_exit=0`
+- 默认编译器：`javac 21.0.10`
