@@ -6,6 +6,83 @@
 - 建议把最新记录放在文件最上方，便于事后快速查看。
 - 记录至少包含：时间、主题、范围、统一结论、问题分级、行动项、关键证据。
 
+## 2026-03-25 10:27:51 +0800
+
+### 主题
+Sprint-1 第八批交付验收：测试用例生成支持显式错误描述并完成一次真实生成演示
+
+### 参与角色
+- P10 主线程：定义“400 + 错误描述”验收标准并完成最终验收
+- P8 执行层：补齐错误描述合同、单测与本地提交
+
+### 评审范围
+- `src/main/java/com/agent/model/testcase/TestcaseGenerateRequest.java`
+- `src/main/java/com/agent/service/testcase/TestcaseGenerationRequest.java`
+- `src/main/java/com/agent/controller/TestcaseGenerationController.java`
+- `src/main/java/com/agent/service/testcase/TestcaseGenerationServiceImpl.java`
+- `src/main/java/com/agent/service/testcase/TestcasePromptBuilder.java`
+- `src/test/java/com/agent/controller/TestcaseGenerationControllerTest.java`
+- `src/test/java/com/agent/service/testcase/TestcaseGenerationServiceImplTest.java`
+- `src/test/java/com/agent/service/testcase/TestcasePromptBuilderTest.java`
+- `meeting.md`
+
+### 统一结论
+- 本轮交付达到放行条件。
+- 测试用例生成请求已新增可选字段 `expectedErrorDescription`，并与既有 `expectedHttpStatus` / `expectedErrorCode` 一起贯通到 controller、service 与 prompt。
+- Prompt 已新增明确约束：显式提供错误描述时必须优先使用；未提供且上下文不明确时，不允许臆造具体错误描述。
+- 在真实运行态下，使用演示输入 `expectedHttpStatus=400`、`expectedErrorDescription=示例错误描述` 调用生成接口后，返回的 Java 代码已包含 `400` 断言和描述断言，并通过 Java 21 实编译。
+- 当前这次真实运行是“合同打通演示通过”，其中 `示例错误描述` 只是演示值，不代表最终业务口径已经冻结。
+
+### 验收结果
+- P8 实现提交
+  - `6fafdcc feat(testcase): add expected error description contract`
+- `mvn -q -Dtest=TestcaseGenerationControllerTest,TestcaseGenerationServiceImplTest,TestcasePromptBuilderTest test`
+  - 结果：通过
+- `mvn -q -DskipTests package`
+  - 结果：通过
+- 服务重启
+  - `bash scripts/stop_service.sh`
+  - `bash scripts/start_service.sh`
+  - 结果：通过；当前常驻进程 PID `3366070`
+- 健康检查
+  - `curl -sS -i -m 5 http://127.0.0.1:8080/actuator/health`
+  - 结果：`HTTP 200`
+- 真实生成演示
+  - `POST /api/testcase/generate`
+  - 请求包含：
+    - `referenceUrl=https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html`
+    - `expectedHttpStatus=400`
+    - `expectedErrorDescription=示例错误描述`
+  - 结果：`HTTP 200`
+- 返回代码静态核验
+  - 结果：`has_java_code=1`、`degraded=true`、`has_status_400=1`、`has_desc=1`
+- Java 21 实编译验证
+  - 结果：`javac_exit=0`
+- LLM 真实耗时
+  - 需求优化：`elapsedMs=39978`
+  - 代码生成：`elapsedMs=153456`
+
+### 核心问题
+
+#### P1
+- 当前真实生成仍然耗时较长，总链路约 193 秒；虽然本轮在放宽客户端超时后能跑通，但默认 180 秒超时下会被客户端判为失败，说明性能边界仍未收口。
+
+#### P2
+- 当前“错误描述”只完成了输入合同、prompt 约束和一次演示性实跑，还没有做生成后代码级强校验，因此最终是否严格使用用户给定描述，仍主要依赖模型遵守约束。
+
+### 决策
+- 在用户给出最终业务描述前，系统先以 `expectedErrorDescription` 作为可选显式输入保留能力，不提前把演示值固化为正式口径。
+- 异常类测试用例以后优先以 `expectedHttpStatus + expectedErrorDescription` 驱动生成，不再只靠 requirement 文本隐式表达。
+
+### 行动项
+- P10：输出本轮验收结论，并把纪要纳入历史记录。
+- 后续执行层：在用户给出正式错误描述后，补一次真实业务值验收；并单独治理生成链路超时边界。
+
+### 关键证据
+- `.ascend_agent/logs/service.log`
+- `/tmp/testcase_400_desc.out`
+- `/tmp/DeleteWorkflowValidationTest.java`
+
 ## 2026-03-24 20:31:43 +0800
 
 ### 主题
