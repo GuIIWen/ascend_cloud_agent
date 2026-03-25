@@ -197,7 +197,7 @@ class TestcaseGenerationServiceImplTest {
         when(webDocumentCrawler.crawl(referenceUrl)).thenReturn(document);
 
         TestcaseGenerationResult result = service.generate(
-                new TestcaseGenerationRequest("验证删除工作流", referenceUrl, 400, "MODELARTS_001"));
+                new TestcaseGenerationRequest("验证删除工作流", referenceUrl, 400, "MODELARTS_001", "示例错误描述"));
 
         assertNotNull(result);
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
@@ -205,5 +205,6 @@ class TestcaseGenerationServiceImplTest {
         String generationPrompt = promptCaptor.getAllValues().get(1);
         assertTrue(generationPrompt.contains("expectedHttpStatus: 400"));
         assertTrue(generationPrompt.contains("expectedErrorCode: MODELARTS_001"));
+        assertTrue(generationPrompt.contains("expectedErrorDescription: 示例错误描述"));
     }
 }

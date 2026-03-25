@@ -87,6 +87,7 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
         String referenceUrl = normalize(request.getReferenceUrl());
         Integer expectedHttpStatus = request.getExpectedHttpStatus();
         String expectedErrorCode = normalize(request.getExpectedErrorCode());
+        String expectedErrorDescription = normalize(request.getExpectedErrorDescription());
         List<ApiMetadata> rawKnowledgeBaseHits = List.of();
 
         if (!hasText(referenceUrl)) {
@@ -125,7 +126,8 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
                 context,
                 !effectiveKbResults.isEmpty(),
                 expectedHttpStatus,
-                expectedErrorCode);
+                expectedErrorCode,
+                expectedErrorDescription);
         String javaTestCode = cleanupCodeFence(llmService.generateTestCode(generationPrompt));
         if (!hasText(javaTestCode)) {
             throw new IllegalStateException("LLM returned empty testcase code");

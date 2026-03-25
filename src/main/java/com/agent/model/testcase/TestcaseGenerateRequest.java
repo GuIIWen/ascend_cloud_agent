@@ -6,6 +6,7 @@ public class TestcaseGenerateRequest {
     private String referenceUrl;
     private Integer expectedHttpStatus;
     private String expectedErrorCode;
+    private String expectedErrorDescription;
 
     public String getRequirement() {
         return requirement;
@@ -37,5 +38,13 @@ public class TestcaseGenerateRequest {
 
     public void setExpectedErrorCode(String expectedErrorCode) {
         this.expectedErrorCode = expectedErrorCode;
+    }
+
+    public String getExpectedErrorDescription() {
+        return expectedErrorDescription;
+    }
+
+    public void setExpectedErrorDescription(String expectedErrorDescription) {
+        this.expectedErrorDescription = expectedErrorDescription;
     }
 }

@@ -33,6 +33,7 @@ class TestcaseGenerationControllerTest {
         request.setReferenceUrl("  https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html  ");
         request.setExpectedHttpStatus(400);
         request.setExpectedErrorCode("  MODELARTS_001  ");
+        request.setExpectedErrorDescription("  示例错误描述  ");
 
         ResponseEntity<?> response = controller.generate(request);
 
@@ -53,6 +54,7 @@ class TestcaseGenerationControllerTest {
         assertEquals("https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html", service.capturedReferenceUrl);
         assertEquals(400, service.capturedExpectedHttpStatus);
         assertEquals("MODELARTS_001", service.capturedExpectedErrorCode);
+        assertEquals("示例错误描述", service.capturedExpectedErrorDescription);
     }
 
     @Test
@@ -105,6 +107,21 @@ class TestcaseGenerationControllerTest {
     }
 
     @Test
+    void generateNormalizesBlankExpectedErrorDescriptionToNull() {
+        SuccessService service = new SuccessService();
+        TestcaseGenerationController controller = new TestcaseGenerationController(service);
+        TestcaseGenerateRequest request = new TestcaseGenerateRequest();
+        request.setRequirement("验证创建实例成功");
+        request.setReferenceUrl("https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html");
+        request.setExpectedErrorDescription("   ");
+
+        ResponseEntity<?> response = controller.generate(request);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNull(service.capturedExpectedErrorDescription);
+    }
+
+    @Test
     void generatePropagatesKbMissWithoutReferenceUrlError() {
         NoHitWithoutUrlService service = new NoHitWithoutUrlService();
         TestcaseGenerationController controller = new TestcaseGenerationController(service);
@@ -128,6 +145,7 @@ class TestcaseGenerationControllerTest {
         private String capturedReferenceUrl;
         private Integer capturedExpectedHttpStatus;
         private String capturedExpectedErrorCode;
+        private String capturedExpectedErrorDescription;
 
         @Override
         public TestcaseGenerationResult generate(TestcaseGenerationRequest request) {
@@ -135,6 +153,7 @@ class TestcaseGenerationControllerTest {
             this.capturedReferenceUrl = request.getReferenceUrl();
             this.capturedExpectedHttpStatus = request.getExpectedHttpStatus();
             this.capturedExpectedErrorCode = request.getExpectedErrorCode();
+            this.capturedExpectedErrorDescription = request.getExpectedErrorDescription();
             return new TestcaseGenerationResult(
                     "assertEquals(200, response.getStatusCode());",
                     List.of(

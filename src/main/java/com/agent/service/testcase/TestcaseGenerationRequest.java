@@ -8,9 +8,10 @@ public class TestcaseGenerationRequest {
     private final String referenceUrl;
     private final Integer expectedHttpStatus;
     private final String expectedErrorCode;
+    private final String expectedErrorDescription;
 
     public TestcaseGenerationRequest(String requirement, String referenceUrl) {
-        this(requirement, referenceUrl, null, null);
+        this(requirement, referenceUrl, null, null, null);
     }
 
     public TestcaseGenerationRequest(
@@ -18,10 +19,20 @@ public class TestcaseGenerationRequest {
             String referenceUrl,
             Integer expectedHttpStatus,
             String expectedErrorCode) {
+        this(requirement, referenceUrl, expectedHttpStatus, expectedErrorCode, null);
+    }
+
+    public TestcaseGenerationRequest(
+            String requirement,
+            String referenceUrl,
+            Integer expectedHttpStatus,
+            String expectedErrorCode,
+            String expectedErrorDescription) {
         this.requirement = requirement;
         this.referenceUrl = referenceUrl;
         this.expectedHttpStatus = expectedHttpStatus;
         this.expectedErrorCode = expectedErrorCode;
+        this.expectedErrorDescription = expectedErrorDescription;
     }
 
     public String getRequirement() {
@@ -38,5 +49,9 @@ public class TestcaseGenerationRequest {
 
     public String getExpectedErrorCode() {
         return expectedErrorCode;
+    }
+
+    public String getExpectedErrorDescription() {
+        return expectedErrorDescription;
     }
 }

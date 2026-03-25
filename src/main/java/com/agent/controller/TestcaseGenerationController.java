@@ -43,12 +43,14 @@ public class TestcaseGenerationController {
         String referenceUrl = normalizeReferenceUrl(request.getReferenceUrl());
         Integer expectedHttpStatus = normalizeExpectedHttpStatus(request.getExpectedHttpStatus());
         String expectedErrorCode = normalizeExpectedErrorCode(request.getExpectedErrorCode());
+        String expectedErrorDescription = normalizeExpectedErrorDescription(request.getExpectedErrorDescription());
         TestcaseGenerationResult result = testcaseGenerationService.generate(
                 new TestcaseGenerationRequest(
                         requirement,
                         referenceUrl,
                         expectedHttpStatus,
-                        expectedErrorCode));
+                        expectedErrorCode,
+                        expectedErrorDescription));
         return ResponseEntity.ok(toResponse(result));
     }
 
@@ -97,6 +99,14 @@ public class TestcaseGenerationController {
             return null;
         }
         String normalized = expectedErrorCode.trim();
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private String normalizeExpectedErrorDescription(String expectedErrorDescription) {
+        if (expectedErrorDescription == null) {
+            return null;
+        }
+        String normalized = expectedErrorDescription.trim();
         return normalized.isEmpty() ? null : normalized;
     }
 
