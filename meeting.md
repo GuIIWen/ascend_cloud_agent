@@ -6,6 +6,74 @@
 - 建议把最新记录放在文件最上方，便于事后快速查看。
 - 记录至少包含：时间、主题、范围、统一结论、问题分级、行动项、关键证据。
 
+## 2026-03-25 10:46:42 +0800
+
+### 主题
+Sprint-1 第九批交付验收：华为云测试用例生成 skill 建设与一次模拟请求验收
+
+### 参与角色
+- P10 主线程：定义 skill 边界、验收 skill 内容并完成一次真实模拟请求
+- P8 执行层：生成 skill 并提交
+
+### 评审范围
+- `.codex/skills/huawei-testcase-generation/SKILL.md`
+- `meeting.md`
+
+### 统一结论
+- 本轮 skill 已达到放行条件。
+- 新增 skill `huawei-testcase-generation` 已覆盖从测试用例描述、参考链接、显式期望、华为云鉴权变量，到本地生成接口调用和 Java 21 编译验收的完整最小流程。
+- Skill 内容与当前项目实现合同一致，未沿用旧版输入结构。
+- 按 skill 中的最小 curl 示例实际调用 `/api/testcase/generate` 后，服务返回 `HTTP 200`，并返回包含 `400` 断言和错误描述断言的 Java 测试代码。
+
+### 验收结果
+- P8 skill 提交
+  - `ea3645e docs(skill): add huawei testcase generation skill`
+- skill 内容核对
+  - 结果：通过
+  - 已覆盖：触发场景、输入合同、鉴权变量、标准流程、失败规则、最小 curl 示例、最小编译验收示例
+- 服务健康检查
+  - `curl -sS -i -m 5 http://127.0.0.1:8080/actuator/health`
+  - 结果：`HTTP 200`
+- 按 skill 模拟请求
+  - `POST /api/testcase/generate`
+  - 请求包含：
+    - `requirement`
+    - `referenceUrl=https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html`
+    - `expectedHttpStatus=400`
+    - `expectedErrorDescription=示例错误描述`
+  - 结果：`HTTP 200`
+- 返回结果摘要
+  - `has_java_code=1`
+  - `degraded=true`
+  - `citations=1`
+  - `has_status_400=1`
+  - `has_desc=1`
+  - `has_placeholder=0`
+  - `has_todo=0`
+- Java 21 实编译验证
+  - 结果：按类名 `DeleteWorkflowTest` 落盘后 `javac_exit=0`
+
+### 核心问题
+
+#### P1
+- 当前 skill 已把“如何生成和验收”文档化，但它依赖现有生成链路的运行时性能；本轮模拟请求虽然通过，仍然用了分钟级等待，后续要继续治理时延。
+
+#### P2
+- 当前模拟请求中的 `expectedErrorDescription=示例错误描述` 仍是演示值，不是最终业务值；skill 能力已备好，但正式验收仍依赖用户给出最终错误描述。
+
+### 决策
+- 以后当用户要“根据测试用例描述 + 华为云 API 文档生成 Java 测试代码”时，优先使用该 skill，不再每次临时口头拼流程。
+- 该 skill 的标准演示路径保留为：`expectedHttpStatus=400` + 显式错误描述 + Java 21 编译验收。
+
+### 行动项
+- P10：输出本轮 skill 验收结论，并把纪要推远端。
+- 后续执行层：在用户给出正式错误描述后，再按 skill 跑一次正式业务值演示。
+
+### 关键证据
+- `.codex/skills/huawei-testcase-generation/SKILL.md`
+- `/tmp/testcase_skill_demo.out`
+- `/tmp/DeleteWorkflowTest.java`
+
 ## 2026-03-25 10:27:51 +0800
 
 ### 主题
