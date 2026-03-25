@@ -117,7 +117,8 @@ public class TestcaseGenerationController {
         return new TestcaseGenerateResponse(
                 result.getJavaTestCode(),
                 toCitationResponses(result.getCitations()),
-                result.isDegraded());
+                result.isDegraded(),
+                result.getRefinedRequirement());
     }
 
     private List<TestcaseCitationResponse> toCitationResponses(List<TestcaseCitation> citations) {

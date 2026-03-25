@@ -11,9 +11,10 @@ import org.slf4j.LoggerFactory;
 
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.LinkedHashSet;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -336,17 +337,16 @@ public class HuaweiCloudApiParser {
             }
         }
 
-        // 尝试提取请求参数
-        Elements paramTables = doc.select("table.param-table, table.parameters");
-        for (Element table : paramTables) {
-            List<com.agent.model.Parameter> params = parseParameterTable(table);
-            builder.parameters(params);
+        builder.parameters(extractParameters(doc));
+
+        String requestBody = extractRequestBody(doc);
+        if (!requestBody.isBlank()) {
+            builder.requestBody(requestBody);
         }
 
-        // 尝试提取响应格式
-        Element responseSection = doc.selectFirst("code.response, .response-example, #response");
-        if (responseSection != null) {
-            builder.responseBody(responseSection.text());
+        String responseBody = extractResponseBody(doc);
+        if (!responseBody.isBlank()) {
+            builder.responseBody(responseBody);
         }
 
         String uriText = extractUriSectionText(doc);
@@ -362,19 +362,75 @@ public class HuaweiCloudApiParser {
     private List<com.agent.model.Parameter> parseParameterTable(Element table) {
         List<com.agent.model.Parameter> params = new ArrayList<>();
         Elements rows = table.select("tbody tr");
+        if (rows.isEmpty()) {
+            rows = table.select("tr");
+        }
+
+        List<String> headers = extractTableHeaders(table);
 
         for (Element row : rows) {
+            if (!row.select("th").isEmpty()) {
+                continue;
+            }
             Elements cells = row.select("td");
             if (cells.size() >= 2) {
-                String name = cells.get(0).text();
-                String type = cells.size() > 1 ? cells.get(1).text() : "string";
-                String description = cells.size() > 2 ? cells.get(2).text() : "";
+                String name = cellText(cells, resolveColumnIndex(headers, List.of("参数", "名称"), 0));
+                if (name.isBlank()) {
+                    continue;
+                }
+                String type = cellText(cells, resolveColumnIndex(headers, List.of("参数类型", "类型"), Math.min(1, cells.size() - 1)));
+                String description = cellText(cells, resolveColumnIndex(headers, List.of("描述", "说明"), Math.min(2, cells.size() - 1)));
+                boolean required = isRequired(cellText(cells, resolveColumnIndex(headers, List.of("是否必选", "是否必填"), -1)));
 
-                params.add(new com.agent.model.Parameter(name, type, description, false));
+                params.add(new com.agent.model.Parameter(
+                        name,
+                        type.isBlank() ? "string" : type,
+                        description,
+                        required));
             }
         }
 
         return params;
+    }
+
+    private List<String> extractTableHeaders(Element table) {
+        List<String> headers = new ArrayList<>();
+        Elements headerCells = table.select("thead th");
+        if (headerCells.isEmpty()) {
+            headerCells = table.select("tr").first() != null ? table.select("tr").first().select("th,td") : new Elements();
+        }
+        for (Element headerCell : headerCells) {
+            headers.add(normalizeWhitespace(headerCell.text()));
+        }
+        return headers;
+    }
+
+    private int resolveColumnIndex(List<String> headers, List<String> candidates, int fallback) {
+        for (int i = 0; i < headers.size(); i++) {
+            String header = headers.get(i);
+            for (String candidate : candidates) {
+                if (header.contains(candidate)) {
+                    return i;
+                }
+            }
+        }
+        return fallback;
+    }
+
+    private String cellText(Elements cells, int index) {
+        if (index < 0 || index >= cells.size()) {
+            return "";
+        }
+        return normalizeWhitespace(cells.get(index).text());
+    }
+
+    private boolean isRequired(String value) {
+        String normalized = normalizeWhitespace(value).toLowerCase(Locale.ROOT);
+        return "是".equals(normalized)
+                || "true".equals(normalized)
+                || "y".equals(normalized)
+                || "yes".equals(normalized)
+                || "required".equals(normalized);
     }
 
     private String resolveApiName(Document doc, String apiName, String sourceUrl) {
@@ -410,26 +466,201 @@ public class HuaweiCloudApiParser {
     }
 
     private String extractUriSectionText(Document doc) {
-        Element uriHeading = doc.selectFirst(
-                "h1:matchesOwn(^URI$), h2:matchesOwn(^URI$), h3:matchesOwn(^URI$), h4:matchesOwn(^URI$), " +
-                ".sectiontitle:matchesOwn(^URI$), dt:matchesOwn(^URI$), strong:matchesOwn(^URI$)");
-        if (uriHeading == null) {
-            uriHeading = doc.selectFirst(
-                    "h1:containsOwn(URI), h2:containsOwn(URI), h3:containsOwn(URI), h4:containsOwn(URI), " +
-                    ".sectiontitle:containsOwn(URI), dt:containsOwn(URI), strong:containsOwn(URI)");
+        Element uriSection = findSectionByHeading(doc, "URI");
+        if (uriSection != null) {
+            return normalizeWhitespace(uriSection.text());
         }
-        if (uriHeading == null) {
+        Element uriHeading = findHeading(doc, "URI");
+        return uriHeading != null ? collectFollowingSectionText(uriHeading) : "";
+    }
+
+    private List<com.agent.model.Parameter> extractParameters(Document doc) {
+        List<com.agent.model.Parameter> params = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+
+        for (Element table : doc.select("table")) {
+            if (!isParameterTable(table)) {
+                continue;
+            }
+            for (com.agent.model.Parameter parameter : parseParameterTable(table)) {
+                String key = parameter.getName() + "|" + parameter.getType();
+                if (seen.add(key)) {
+                    params.add(parameter);
+                }
+            }
+        }
+
+        return params;
+    }
+
+    private boolean isParameterTable(Element table) {
+        String context = collectTableContext(table).toLowerCase(Locale.ROOT);
+        if (context.contains("响应body参数")
+                || context.contains("响应参数")
+                || context.contains("response")
+                || context.contains("状态码")
+                || context.contains("错误码")) {
+            return false;
+        }
+        return context.contains("路径参数")
+                || context.contains("请求参数")
+                || context.contains("query参数")
+                || context.contains("header参数")
+                || context.contains("body参数")
+                || context.contains("form参数")
+                || context.contains("参数");
+    }
+
+    private String extractRequestBody(Document doc) {
+        Element requestSection = findSectionByHeading(doc, "请求参数");
+        if (requestSection == null) {
             return "";
         }
 
+        String text = normalizeWhitespace(requestSection.text());
+        if (text.endsWith("无") || "请求参数 无".equals(text)) {
+            return "无";
+        }
+
+        Element exampleSection = findSectionByHeading(doc, "请求示例");
+        String example = extractCodeBlock(exampleSection);
+        if (!example.isBlank()) {
+            return example;
+        }
+
+        String structured = stringifyTables(requestSection.select("table"));
+        if (!structured.isBlank()) {
+            return structured;
+        }
+
+        return text.replaceFirst("^请求参数\\s*", "").trim();
+    }
+
+    private String extractResponseBody(Document doc) {
+        Element responseExampleSection = findSectionByHeading(doc, "响应示例");
+        String example = extractCodeBlock(responseExampleSection);
+        if (!example.isBlank()) {
+            return example;
+        }
+
+        Element responseSection = findSectionByHeading(doc, "响应参数");
+        if (responseSection == null) {
+            Element responseNode = doc.selectFirst("code.response, .response-example, #response");
+            return responseNode != null ? normalizeWhitespace(responseNode.text()) : "";
+        }
+
+        String structured = stringifyTables(responseSection.select("table"));
+        if (!structured.isBlank()) {
+            return structured;
+        }
+
+        return normalizeWhitespace(responseSection.text()).replaceFirst("^响应参数\\s*", "").trim();
+    }
+
+    private Element findSectionByHeading(Document doc, String headingText) {
+        Element heading = findHeading(doc, headingText);
+        if (heading == null) {
+            return null;
+        }
+        Element parent = heading.parent();
+        if (parent != null && parent.hasClass("section")) {
+            return parent;
+        }
+
+        Element container = heading;
+        while (container.parent() != null && !"body".equals(container.parent().tagName())) {
+            Element parentNode = container.parent();
+            if (parentNode.select("> h1, > h2, > h3, > h4, > h5, > h6").contains(heading)) {
+                return parentNode;
+            }
+            container = parentNode;
+        }
+        return heading;
+    }
+
+    private Element findHeading(Document doc, String headingText) {
+        Elements headings = doc.select("h1, h2, h3, h4, h5, h6, .sectiontitle, dt, strong");
+        for (Element heading : headings) {
+            if (headingText.equalsIgnoreCase(normalizeWhitespace(heading.text()))) {
+                return heading;
+            }
+        }
+        return null;
+    }
+
+    private String collectFollowingSectionText(Element heading) {
         StringBuilder sb = new StringBuilder();
-        for (Element sibling = uriHeading.nextElementSibling(); sibling != null; sibling = sibling.nextElementSibling()) {
-            if (sibling.tagName().matches("h1|h2|h3|h4")) {
+        for (Element sibling = heading.nextElementSibling(); sibling != null; sibling = sibling.nextElementSibling()) {
+            if (sibling.tagName().matches("h1|h2|h3|h4|h5|h6")
+                    || sibling.hasClass("sectiontitle")) {
                 break;
             }
             sb.append(sibling.text()).append('\n');
         }
-        return sb.toString();
+        return normalizeWhitespace(sb.toString());
+    }
+
+    private String collectTableContext(Element table) {
+        List<String> fragments = new ArrayList<>();
+        Element caption = table.selectFirst("caption");
+        if (caption != null) {
+            fragments.add(caption.text());
+        }
+
+        Element parent = table.parent();
+        if (parent != null) {
+            Element heading = parent.selectFirst("h1, h2, h3, h4, h5, h6, .sectiontitle");
+            if (heading != null) {
+                fragments.add(heading.text());
+            }
+        }
+
+        Element previous = table.previousElementSibling();
+        int depth = 0;
+        while (previous != null && depth < 3) {
+            fragments.add(previous.text());
+            previous = previous.previousElementSibling();
+            depth++;
+        }
+
+        return normalizeWhitespace(String.join(" ", fragments));
+    }
+
+    private String extractCodeBlock(Element section) {
+        if (section == null) {
+            return "";
+        }
+        Element codeBlock = section.selectFirst("pre, code");
+        return codeBlock != null ? codeBlock.text().trim() : "";
+    }
+
+    private String stringifyTables(Elements tables) {
+        StringBuilder sb = new StringBuilder();
+        for (Element table : tables) {
+            String caption = normalizeWhitespace(table.select("caption").text());
+            if (!caption.isBlank()) {
+                sb.append(caption).append('\n');
+            }
+            for (com.agent.model.Parameter parameter : parseParameterTable(table)) {
+                sb.append(parameter.getName())
+                        .append(" : ")
+                        .append(parameter.getType());
+                if (!parameter.getDescription().isBlank()) {
+                    sb.append(" - ").append(parameter.getDescription());
+                }
+                sb.append('\n');
+            }
+        }
+        return sb.toString().trim();
+    }
+
+    private String normalizeWhitespace(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace('\u00A0', ' ')
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 
     private boolean hasMeaningfulContent(Document doc) {

@@ -10,11 +10,21 @@ public class TestcaseGenerationResult {
     private final String javaTestCode;
     private final List<TestcaseCitation> citations;
     private final boolean degraded;
+    private final String refinedRequirement;
 
     public TestcaseGenerationResult(String javaTestCode, List<TestcaseCitation> citations, boolean degraded) {
+        this(javaTestCode, citations, degraded, null);
+    }
+
+    public TestcaseGenerationResult(
+            String javaTestCode,
+            List<TestcaseCitation> citations,
+            boolean degraded,
+            String refinedRequirement) {
         this.javaTestCode = javaTestCode;
         this.citations = citations == null ? List.of() : List.copyOf(citations);
         this.degraded = degraded;
+        this.refinedRequirement = refinedRequirement;
     }
 
     public String getJavaTestCode() {
@@ -27,5 +37,9 @@ public class TestcaseGenerationResult {
 
     public boolean isDegraded() {
         return degraded;
+    }
+
+    public String getRefinedRequirement() {
+        return refinedRequirement;
     }
 }

@@ -23,6 +23,7 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
 
     private static final int DEFAULT_TOP_K = 5;
     private static final int MAX_REFERENCE_CONTEXT_CHARS = 8_000;
+    private static final int MAX_KB_CONTEXT_RESULTS = 1;
 
     private final KnowledgeBaseService knowledgeBaseService;
     private final LLMService llmService;
@@ -103,6 +104,7 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
         if (effectiveKbResults.isEmpty() && !rawKnowledgeBaseHits.isEmpty()) {
             effectiveKbResults = rawKnowledgeBaseHits;
         }
+        effectiveKbResults = limitKnowledgeBaseHits(effectiveKbResults);
 
         boolean degraded;
         String context;
@@ -132,9 +134,23 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
         if (!hasText(javaTestCode)) {
             throw new IllegalStateException("LLM returned empty testcase code");
         }
-        javaTestCode = generatedTestcasePostProcessor.process(javaTestCode);
+        try {
+            javaTestCode = generatedTestcasePostProcessor.process(javaTestCode);
+        } catch (IllegalStateException e) {
+            logger.error(
+                    "Generated testcase post-processing failed: requirement='{}' refinedRequirement='{}' preview='{}'",
+                    requirement,
+                    refinedRequirement,
+                    abbreviate(javaTestCode),
+                    e);
+            throw e;
+        }
 
-        return new TestcaseGenerationResult(javaTestCode, dedupeCitations(citations), degraded);
+        return new TestcaseGenerationResult(
+                javaTestCode,
+                dedupeCitations(citations),
+                degraded,
+                refinedRequirement);
     }
 
     private String refineRequirement(String requirement) {
@@ -187,6 +203,15 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
             citations.add(TestcaseCitation.knowledgeBase(metadata.getApiId(), normalize(metadata.getSourceLocation())));
         }
         return citations;
+    }
+
+    private List<ApiMetadata> limitKnowledgeBaseHits(List<ApiMetadata> results) {
+        if (results == null || results.isEmpty()) {
+            return List.of();
+        }
+        return results.stream()
+                .limit(MAX_KB_CONTEXT_RESULTS)
+                .toList();
     }
 
     private ReferenceContext fetchReferenceContext(String referenceUrl) {
@@ -254,6 +279,17 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
 
     private String nullToEmpty(String value) {
         return value == null ? "" : value;
+    }
+
+    private String abbreviate(String value) {
+        if (!hasText(value)) {
+            return "";
+        }
+        String normalized = value.trim().replaceAll("\\s+", " ");
+        if (normalized.length() <= 240) {
+            return normalized;
+        }
+        return normalized.substring(0, 240) + "...";
     }
 
     private String normalize(String value) {

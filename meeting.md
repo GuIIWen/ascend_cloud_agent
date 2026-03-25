@@ -6,6 +6,824 @@
 - 建议把最新记录放在文件最上方，便于事后快速查看。
 - 记录至少包含：时间、主题、范围、统一结论、问题分级、行动项、关键证据。
 
+## 2026-03-25 20:36:41 +0800
+
+### 主题
+Sprint-1 第二十七批真实接口验收：使用正确 Lite Server id 后的 DetachDevServerVolume 返回
+
+### 参与角色
+- P10 主线程：使用正确 Lite Server 资源 ID 直连真实接口复核
+
+### 统一结论
+- 已改用真实 Lite Server 资源 ID `f13a67fc-11c4-48f9-8f0f-b533a5bcea13` 重新调用 `DetachDevServerVolume`。
+- 本次不再返回 `instance not found`，说明资源 ID 选型已正确。
+- 真实返回为：
+  - `HTTP 400`
+  - `error_code = ModelArts.7000`
+  - `error_msg = Server f13a67fc-11c4-48f9-8f0f-b533a5bcea13 type is BMS, does not support detach volume device.`
+- 结论已经明确：当前这台 `liteserver-bm-a2-1203` 是 `BMS` 类型 Lite Server，该接口不支持对这类实例执行卸载磁盘设备操作。
+
+### 关键证据
+- 请求：
+  - `DELETE https://modelarts.cn-north-9.myhuaweicloud.com/v1/2b5cf022801c4a1cac8ee90d431a8f20/dev-servers/f13a67fc-11c4-48f9-8f0f-b533a5bcea13/detachvolume/0ce45186-07a7-4139-98b9-2a00233b5ba5`
+- 响应：
+  - `HTTP 400`
+  - `X-Request-Id: 71f2993bb44fa789d3a61b8b6201ba95`
+  - `{"error_code":"ModelArts.7000","error_msg":"Server f13a67fc-11c4-48f9-8f0f-b533a5bcea13 type is BMS, does not support detach volume device."}`
+
+## 2026-03-25 20:26:22 +0800
+
+### 主题
+Sprint-1 第二十六批真实资源映射核验：`cloud_server.id` 与 `Lite Server id` 不是同一个字段
+
+### 参与角色
+- P10 主线程：用真实 `ListAllDevServers` 接口核对实例映射关系
+
+### 统一结论
+- 用户给出的 `56048fb9-726e-403d-8044-26c1dbacbca2` 确实存在，但它不是 `DetachDevServerVolume` 接口所需的 Lite Server 资源 ID，而是底层 `cloud_server.id`。
+- 在 `GET /v1/{project_id}/dev-servers/all` 返回中，这台机器的真实 Lite Server 资源为：
+  - `id = f13a67fc-11c4-48f9-8f0f-b533a5bcea13`
+  - `cloud_server.id = 56048fb9-726e-403d-8044-26c1dbacbca2`
+  - `name = liteserver-bm-a2-1203`
+  - `status = RUNNING`
+  - `volumes[0].evs_id = 0ce45186-07a7-4139-98b9-2a00233b5ba5`
+- 因此此前 `DELETE /dev-servers/56048.../detachvolume/0ce4...` 返回 `ModelArts.6404 not found` 是符合预期的，因为接口查的是 Lite Server 资源 ID，不是底层 BMS/ECS ID。
+
+### 关键证据
+- `GET https://modelarts.cn-north-9.myhuaweicloud.com/v1/2b5cf022801c4a1cac8ee90d431a8f20/dev-servers/all`
+- 命中记录：
+  - `id = f13a67fc-11c4-48f9-8f0f-b533a5bcea13`
+  - `cloud_server.id = 56048fb9-726e-403d-8044-26c1dbacbca2`
+  - `volumes[0].evs_id = 0ce45186-07a7-4139-98b9-2a00233b5ba5`
+
+## 2026-03-25 20:14:27 +0800
+
+### 主题
+Sprint-1 第二十五批真实接口验收：DetachDevServerVolume 指定实例/磁盘调用返回
+
+### 参与角色
+- P10 主线程：读取用户更新后的 token，直连华为云真实接口验收
+
+### 统一结论
+- 已使用用户更新后的 token 调用真实接口。
+- 该 token 当前绑定项目为 `cn-north-9`，`project_id=2b5cf022801c4a1cac8ee90d431a8f20`。
+- 对以下资源发起卸载请求后，真实返回为 `HTTP 400`：
+  - `dev-server id=56048fb9-726e-403d-8044-26c1dbacbca2`
+  - `volume_id=0ce45186-07a7-4139-98b9-2a00233b5ba5`
+- 真实错误为：
+  - `error_code=ModelArts.6404`
+  - `error_msg=LiteServer instance '56048fb9-726e-403d-8044-26c1dbacbca2' not found.`
+- 这说明当前失败点发生在 `Lite Server 实例不存在/当前项目下找不到`，还没进入到磁盘合法性校验阶段。
+
+### 关键证据
+- 请求：
+  - `DELETE https://modelarts.cn-north-9.myhuaweicloud.com/v1/2b5cf022801c4a1cac8ee90d431a8f20/dev-servers/56048fb9-726e-403d-8044-26c1dbacbca2/detachvolume/0ce45186-07a7-4139-98b9-2a00233b5ba5`
+- 响应：
+  - `HTTP 400`
+  - `X-Request-Id: 8346d725662901265ce3d15846d2d69f`
+  - `{"error_code":"ModelArts.6404","error_msg":"LiteServer instance '56048fb9-726e-403d-8044-26c1dbacbca2' not found."}`
+
+## 2026-03-25 18:43:38 +0800
+
+### 主题
+Sprint-1 第二十四批运行态闭环：重新编译部署后对四个问题的真实验收
+
+### 参与角色
+- P10 主线程：重新编译、重启服务、重刷知识库、宿主机接口验收
+
+### 统一结论
+- 之前“为什么还没修好”的根因已经验证清楚：当时确实是我没有把工作区改动推进到运行态闭环。
+- 现在已经完成 `mvn package -> stop/start service -> 全量重刷 -> 宿主机接口复测`。
+- 用户指出的四个问题，在当前运行态已经全部修正：
+  - `卸载系统盘` 不再漂到 `CancelObs`
+  - `卸载开发服务器卷` 不再漂到 `DeleteService`
+  - `DetachDevServerVolume` 的 `parameters/requestBody/responseBody` 已有真实结构化内容
+  - `citations` 已收敛为单条正确引用，不再混入无关 API
+- 但这轮同时暴露了一个新的更后置问题：生成接口虽已 `200`，生成的测试代码仍存在业务语义上的硬编码/臆造值，例如把 `volume_id` 写成 `"system"`，这不是前述四个问题，而是下一阶段的生成质量问题。
+
+### 验收结果
+- 构建与部署
+  - `mvn -q -Dtest=TestcaseGenerationServiceImplTest,KnowledgeBaseServiceImplWeakConsistencyTest,HuaweiCloudApiCrawlerServiceTest test`：通过
+  - `mvn -q -DskipTests package`：通过
+  - 新服务 PID：`3582928`
+  - `GET /actuator/health`：`HTTP 200`
+- 全量重刷
+  - `POST /api/knowledge/crawl/huawei-cloud`
+  - 结果：`success=true`，`successCount=258`，`failureCount=0`，`durationMs=123780`
+- 检索验收 1
+  - query：`卸载系统盘`
+  - top1：`DetachDevServerVolume`
+  - 结构化字段：`parameters=3`，`requestBody=无`，`responseBody` 为真实响应示例
+- 检索验收 2
+  - query：`卸载Lite Server系统盘`
+  - top1：`DetachDevServerVolume`
+- 检索验收 3
+  - query：`卸载开发服务器卷`
+  - top1：`DetachDevServerVolume`
+- 生成接口验收
+  - `POST /api/testcase/generate`
+  - 入参：`{"requirement":"卸载Lite Server系统盘"}`
+  - 结果：`HTTP 200`
+  - `citations`：仅 1 条，且为 `DetachDevServerVolume`
+  - `refinedRequirement`：已返回
+
+### 核心问题
+
+#### P1
+- 生成测试代码仍存在业务语义偏差：示例输出里把路径参数 `volume_id` 硬编码成 `"system"`，且对详情断言引入了未从上下文明确约束出的字段/状态。
+
+### 决策
+- 当前四个指定问题验收通过。
+- 下一步从“知识库/召回问题”切到“代码生成质量问题”，重点治理：
+  - 必填路径参数一律从配置读取，不得臆造
+  - 断言只能使用上下文中已知字段和明确约束
+
+### 关键证据
+- `scripts/start_service.sh`
+- `src/main/java/com/agent/parser/HuaweiCloudApiParser.java`
+- `src/main/java/com/agent/service/KnowledgeBaseServiceImpl.java`
+- `src/main/java/com/agent/service/testcase/TestcaseGenerationServiceImpl.java`
+- `POST /api/knowledge/search`
+- `POST /api/testcase/generate`
+
+## 2026-03-25 17:40:42 +0800
+
+### 主题
+Sprint-1 第二十三批结论澄清：四个问题为什么在运行态还没消失
+
+### 参与角色
+- P10 主线程：核对工作区改动、运行中服务状态、生成链路引用逻辑
+
+### 统一结论
+- 这四个问题没有在运行态消失，不是因为没人修，而是因为“代码已改，但还没完成主线程验收后的重启生效与重新索引”。
+- 当前工作区里已经存在 parser 修复和 retrieval 修复代码，但运行中的 `3518618` 进程仍是旧版本服务。
+- 其中 parser 类问题即使代码已改，也必须用新 parser 再次重刷网页，才能把 `requestBody/responseBody/parameters` 重新写入存储。
+- `citations` 噪声问题本轮也没有被直接修，当前实现仍会把 `effectiveKbResults` 全量转成 citations，因此只要召回结果里混入无关 concrete hit，引用就会脏。
+
+### 验收结果
+- 工作区状态
+  - `HuaweiCloudApiParser.java`、`HuaweiCloudApiParserTest.java` 已修改
+  - `KnowledgeBaseServiceImpl.java`、`KnowledgeBaseServiceImplWeakConsistencyTest.java` 已修改
+- 运行态状态
+  - `service.log` 里当前搜索日志仍是旧口径：`Found 3 results for query`
+  - 新 retrieval 代码的日志口径应为：`Found {} results for query after ranking {} unique candidates across {} variants`
+  - 结论：运行中服务尚未切到新实现
+- 生成链路引用逻辑
+  - `TestcaseGenerationServiceImpl.buildKnowledgeBaseCitations()` 仍对 `effectiveKbResults` 全量生成 citations
+  - 本轮没有新增 citations 过滤或主引用收敛逻辑
+
+### 核心问题
+
+#### P1
+- parser 修复代码尚未经过“重启服务 + 重新爬取/重建索引 + 宿主机接口复测”的完整闭环，所以运行态仍看到结构化字段为空。
+
+#### P1
+- retrieval 修复代码尚未部署到当前运行进程，所以运行态仍可能继续返回 `CancelObs` / `DeleteService`。
+
+#### P2
+- citations 噪声不是 parser 问题，而是生成链路当前按 `effectiveKbResults` 全量出引用；这条本轮没有单独修。
+
+### 决策
+- 口径统一为：`已编码，未完成运行态闭环`
+- 下一步必须按顺序执行：
+  - 合入当前两条修复
+  - 重新构建并重启服务
+  - 用新 parser 全量重刷知识库
+  - 再做 `/api/knowledge/search` 与 `/api/testcase/generate` 宿主机验收
+  - 单独补 citations 收敛逻辑
+
+### 关键证据
+- `git status --short`
+- `src/main/java/com/agent/parser/HuaweiCloudApiParser.java`
+- `src/main/java/com/agent/service/KnowledgeBaseServiceImpl.java`
+- `src/main/java/com/agent/service/testcase/TestcaseGenerationServiceImpl.java`
+- `.ascend_agent/logs/service.log`
+
+## 2026-03-25 17:15:45 +0800
+
+### 主题
+Sprint-1 第二十二批并行验收：全量网页重刷与失败点复测
+
+### 参与角色
+- P10 主线程：组织刷新、复测、最终验收与记录沉淀
+- P8 执行视角：执行全量网页重刷并回传结果
+- P9 验收视角：复测失败点并给出通过性结论
+
+### 统一结论
+- 本轮全量网页重刷已完成，`258/258` 成功，`failureCount=0`，`durationMs=70590`。
+- `/api/testcase/generate` 对 `requirement=卸载Lite Server系统盘` 本轮已真实返回 `HTTP 200`，并且响应中确实包含 `javaTestCode`、`citations`、`degraded`、`refinedRequirement`。
+- 与上一轮相比，`DetachDevServerVolume` 相关 parser 脏数据已有改善：`httpMethod` 已稳定为 `DELETE`，`description` 已恢复为与 Lite Server 卸载磁盘相关的正确文案。
+- 但结构化抽取仍未过关：`requestBody=null`、`responseBody=null`、`parameters=[]` 依旧为空。
+- 召回漂移仍未解决：`卸载系统盘` 仍漂到 `CancelObs`，`卸载开发服务器卷` 仍漂到 `DeleteService`；只有 `卸载Lite Server系统盘` top1 命中正确 API。
+- 本轮日志中未再出现上轮的 `429`；要求优化与代码生成两个 LLM 调用均为 `status=200`。
+
+### 验收结果
+- 全量网页重刷
+  - 请求：`POST /api/knowledge/crawl/huawei-cloud`
+  - 目录页：`https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html`
+  - 结果：`success=true`，`successCount=258`，`failureCount=0`，`durationMs=70590`
+- 召回复测 1
+  - query：`卸载系统盘`
+  - top1：`huawei-cancelobs--1027994440`
+  - method：`CancelObs`
+  - endpoint：`DELETE /v1/{project_id}/notebooks/{instance_id}/storage/{storage_id}`
+  - 结论：不通过，仍为错误 API
+- 召回复测 2
+  - query：`卸载Lite Server系统盘`
+  - top1：`huawei-detachdevservervolume-1288194079`
+  - method：`DetachDevServerVolume`
+  - endpoint：`DELETE /v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}`
+  - 结论：通过，top1 命中正确 API
+  - 结构化字段：`parameters=[]`，`requestBody=null`，`responseBody=null`
+- 召回复测 3
+  - query：`卸载开发服务器卷`
+  - top1：`huawei-deleteservice--1488106924`
+  - method：`DeleteService`
+  - endpoint：`DELETE /v1/{project_id}/services/{service_id}`
+  - 结论：不通过，仍发生召回漂移
+- 生成链路复测
+  - 请求：`POST /api/testcase/generate`
+  - 入参：`{"requirement":"卸载Lite Server系统盘"}`
+  - 结果：`HTTP 200`
+  - 响应字段核验
+    - `javaTestCode`：有
+    - `citations`：有
+    - `degraded`：`false`
+    - `refinedRequirement`：有
+  - refinedRequirement 真实返回：
+    - `测试目标：验证卸载Lite Server系统盘功能。前置条件：存在一台已挂载系统盘的Lite Server实例。输入参数：服务器实例ID、系统盘ID。测试步骤：调用卸载磁盘接口，传入指定ID。预期结果：接口返回成功，系统盘挂载状态变更为“未挂载”或“可用”，服务器详情中系统盘ID字段为空。`
+  - 额外观察
+    - citations 中除正确的 `DetachDevServerVolume` 外，还混入了 `DeleteDevServer`，说明引用选择仍有噪声
+    - 生成代码本轮仅完成接口级返回验收，尚未做编译/真实执行验收
+
+### 核心问题
+
+#### P1
+- 召回漂移仍明显存在，`卸载系统盘` 与 `卸载开发服务器卷` 两个 query 仍无法稳定打到 `DetachDevServerVolume`。
+
+#### P1
+- `DetachDevServerVolume` 的结构化字段依然为空，说明 parser 抽取问题尚未真正修通，后续会继续拖累生成质量与精确断言。
+
+#### P2
+- 生成接口虽然已恢复 `200`，但 citations 仍有噪声，说明检索结果消费与引用筛选策略还不够干净。
+
+### 决策
+- 本轮判定为：`部分通过`
+- 通过项
+  - 全量网页重刷成功
+  - `卸载Lite Server系统盘` top1 已稳定命中正确 API
+  - `testcase/generate` 已恢复成功返回，且 `refinedRequirement` 已对外可见
+- 未通过项
+  - parser 结构化抽取未完成
+  - 检索漂移未完成治理
+
+### 行动项
+- 下一优先级 1：修 `HuaweiCloudApiParser`，把 `requestBody/responseBody/parameters` 对 `DetachDevServerVolume` 这类页面真正抽出来。
+- 下一优先级 2：修 `KnowledgeBaseServiceImpl` 的召回排序/消费逻辑，压制 `CancelObs`、`DeleteService` 这类 DELETE 类接口的误召回。
+- 下一优先级 3：在 parser 和召回修正后，重新跑 `generate -> compile -> 真实调用/模拟调用` 的完整业务验收。
+
+### 关键证据
+- `POST /api/knowledge/crawl/huawei-cloud`
+- `POST /api/knowledge/search`
+- `POST /api/testcase/generate`
+- `.ascend_agent/logs/service.log`
+
+## 2026-03-25 16:11:50 +0800
+
+### 主题
+Sprint-1 第二十一批并行验收：refine 文本可见性核验与召回改造方案收口
+
+### 参与角色
+- P10 主线程：主线程复核、拍板后续召回治理顺序
+- P8 执行代理：核验 refined requirement 当前是否可见、可追踪
+- P9 方案视角：收口知识库召回改造方案
+
+### 统一结论
+- 当前系统中 `refined requirement` 确实会生成，但它只是运行时中间变量：没有进返回对象、没有进日志正文、没有单独接口、没有持久化，因此对调用方是不可见、不可追踪的。
+- 这一点不是“本次没观测到”，而是当前实现本身没有暴露。
+- 知识库召回的主问题已经明确：不是完全搜不到，而是“搜到了也只是弱结构结果”，导致生成主链路不能把 top1 命中当成 concrete hit 消费。
+- 召回治理优先级已经拍板：先修结构化 metadata 打通，再治漂移，再做长期 hybrid 检索与评测体系。
+
+### 验收结果
+- refine 生成位置
+  - `TestcaseGenerationServiceImpl.generate()` 中先调 `refineRequirement(requirement)`
+  - `refineRequirement()` 内部通过 `TestcasePromptBuilder.buildRefinementPrompt()` + `llmService.generateTestCode()` 生成 refined 文本
+- refine 使用位置
+  - `knowledgeBaseService.search(refinedRequirement, topK)`
+  - `promptBuilder.buildCodeGenerationPrompt(refinedRequirement, ...)`
+- refine 暴露情况
+  - `TestcaseGenerateResponse` 只有 `javaTestCode/citations/degraded`
+  - `TestcaseGenerationResult` 只有 `javaTestCode/citations/degraded`
+  - `TestcaseGenerationController` 也未返回 refined 文本
+  - 结论：当前接口对调用方不可见
+- refine 日志情况
+  - `HttpChatCompletionsLLMService` 仅记录 `mode/status/maxTokens/elapsedMs`
+  - `service.log` 可见 `TASK_MODE=REQUIREMENT_REFINEMENT` 调用发生，但看不到 refined 文本内容
+  - 结论：当前运行时也不可直接追踪 refined 文本本身
+- P9 改造方案拍板
+  - 阶段 1：补齐爬虫/解析/metadata 落盘与 concrete 命中判定
+  - 阶段 2：重建向量文本、引入重排、增加 query 漂移拦截
+  - 阶段 3：升级为 hybrid retrieval + 更强知识模型 + 评测体系
+
+### 核心问题
+
+#### P1
+- `refined requirement` 对调用方不可见，导致用户无法核验“描述优化”到底把原始需求改成了什么。
+
+#### P1
+- 当前 top1 命中的 `DetachDevServerVolume` 仍以弱结构 `ApiMetadata` 返回，导致生成主链路继续报 `TESTCASE_REFERENCE_URL_REQUIRED`。
+
+#### P2
+- 检索漂移仍然存在，例如“卸载开发服务器卷”会偏到 `DeleteService`，说明仅靠 description 文本相似度不够。
+
+### 决策
+- 当前接受“refine 已存在但不可见”的事实判断，后续若要给用户看，需要单独做接口或结果字段暴露。
+- 知识库召回治理顺序固定为：
+  - 先做阶段 1：结构化 metadata 打通
+  - 再做阶段 2：召回稳定性与漂移治理
+  - 阶段 3 暂不展开大改
+- 后续子代理统一使用 `gpt-5.4`，不再修改模型。
+
+### 行动项
+- P10：输出本轮验收结论。
+- 后续执行层：先修 metadata 结构化与 concrete hit 打通，再继续召回稳定性优化。
+
+### 关键证据
+- `src/main/java/com/agent/service/testcase/TestcaseGenerationServiceImpl.java`
+- `src/main/java/com/agent/model/testcase/TestcaseGenerateResponse.java`
+- `src/main/java/com/agent/service/testcase/TestcaseGenerationResult.java`
+- `src/main/java/com/agent/controller/TestcaseGenerationController.java`
+- `src/main/java/com/agent/service/impl/HttpChatCompletionsLLMService.java`
+- `.ascend_agent/logs/service.log`
+
+## 2026-03-25 15:58:09 +0800
+
+### 主题
+Sprint-1 第二十批并行验收：skill 流程化改写与“卸载系统盘”召回核验
+
+### 参与角色
+- P10 主线程：并行分派、主线程复核、最终验收
+- P8 执行代理 1：重写 skill 为通用流程资产
+- P8 执行代理 2：核验当前向量检索召回结果
+
+### 统一结论
+- `huawei-testcase-generation` skill 的主流程已回归通用流程资产，显式补齐了“测试用例描述优化（refine）”步骤，不再把具体 API 场景当默认主路径。
+- 当前“卸载系统盘”相关 query 的真实召回结果已核验：
+  - `卸载系统盘`：top1 命中 `DetachDevServerVolume`
+  - `卸载Lite Server系统盘`：top1 命中 `DetachDevServerVolume`
+  - `卸载开发服务器卷`：top1 漂移到 `DeleteService`
+- 更关键的问题是：虽然前两条 query 的 top1 已经命中了正确 API，但返回的 metadata 仍是弱结构，`httpMethod/endpoint/requestBody/responseBody/className/methodName/signature` 全为空；因此生成主链路仍会把它判定为 KB miss。
+- 已做接口级复核：直接调用 `/api/testcase/generate` 且不带 `referenceUrl`，`requirement=卸载Lite Server系统盘` 时，真实返回仍是 `HTTP 400` + `TESTCASE_REFERENCE_URL_REQUIRED`。这说明当前阻塞点不是“语义完全搜不到”，而是“向量召回结果缺乏可被主链路接受的结构化 metadata”。
+
+### 验收结果
+- Skill 验收
+  - 结果：通过
+  - 主流程已收口为：`requirement -> refine -> retrieval -> referenceUrl fallback -> codegen -> validate -> compile`
+  - 已去除把具体 API 场景作为默认主路径的写法
+- 检索接口健康
+  - `GET /actuator/health`
+  - 结果：`HTTP 200`
+- 检索结果 1
+  - query：`卸载系统盘`
+  - top1：`huawei-detachdevservervolume-1288194079`
+  - source：`https://support.huaweicloud.com/api-modelarts/DetachDevServerVolume.html`
+  - 描述中可见端点：`DELETE /v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}`
+- 检索结果 2
+  - query：`卸载Lite Server系统盘`
+  - top1：`huawei-detachdevservervolume-1288194079`
+  - source：`https://support.huaweicloud.com/api-modelarts/DetachDevServerVolume.html`
+  - 描述中可见端点：`DELETE /v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}`
+- 检索结果 3
+  - query：`卸载开发服务器卷`
+  - top1：`huawei-deleteservice--1488106924`
+  - source：`https://support.huaweicloud.com/api-modelarts/DeleteService.html`
+  - 结论：发生检索漂移
+- 生成链路复核
+  - 请求：`POST /api/testcase/generate`，仅传 `requirement=卸载Lite Server系统盘`
+  - 结果：`HTTP 400`
+  - 错误码：`TESTCASE_REFERENCE_URL_REQUIRED`
+
+### 核心问题
+
+#### P1
+- 向量检索虽然已经能在部分 query 上把 `DetachDevServerVolume` 排到 top1，但返回给主链路的 `ApiMetadata` 结构字段为空，导致 `isConcreteKnowledgeHit()` 判定失败，主链路仍然必须依赖 `referenceUrl`。
+
+#### P1
+- Query 语义稍有变化就会发生漂移，例如 `卸载开发服务器卷` 被错误召回到 `DeleteService`，说明当前索引文本与召回判定还不够稳。
+
+#### P2
+- Skill 虽然已回归流程资产，但示例里仍引用了具体 API URL；它已明确标注为 example，不再阻塞本轮放行，但后续仍可继续去 API 化。
+
+### 决策
+- 本轮接受 skill 改写结果。
+- 当前检索能力的准确口径为：“部分 query top1 可命中正确 API，但仍不是可被生成主链路直接消费的 concrete hit。”
+- 后续要解决“无 `referenceUrl` 也能生成”，必须补齐知识库中 `ApiMetadata` 的结构化字段，而不是只依赖 description 文本相似度。
+
+### 行动项
+- P10：输出本轮验收结论。
+- 后续执行层：治理知识库 metadata 结构化落盘与检索漂移问题。
+
+### 关键证据
+- `.codex/skills/huawei-testcase-generation/SKILL.md`
+- `src/main/java/com/agent/service/testcase/TestcaseGenerationServiceImpl.java`
+- `POST /api/knowledge/search`
+- `POST /api/testcase/generate`
+
+## 2026-03-25 15:42:34 +0800
+
+### 主题
+Sprint-1 第十九批架构结论：测试用例生成 skill 应回归流程资产
+
+### 参与角色
+- P10 主线程：组织结论并拍板 skill 边界
+- P9 方案视角：定义 skill 目录结构与流程边界
+- P8 执行视角：评审当前 skill 对执行层的误导点
+
+### 统一结论
+- 当前 `huawei-testcase-generation` skill 写偏了，已经从“通用流程资产”滑成了“某个 API 场景的验收样例”。
+- skill 的主目标应当是：指导“从测试用例描述到 Java 测试代码生成与验收”的通用流程，而不是固化某个 API 的 referenceUrl、endpoint、错误码或真值。
+- `测试用例描述优化` 必须成为 skill 的显式步骤，而不是隐含在实现里。
+- 具体 API 的真实返回、真值断言、场景纠偏记录，不应写在 skill 主流程里；这些内容应进入 `meeting.md` 或单独 example 文档。
+
+### P9 结论
+- skill 应按“Goal/Inputs/Pre-flight/Refine/Retrieval/Context Build/Codegen/Post-process/Acceptance/Troubleshooting”组织。
+- skill 必须定义：KB 命中判定、弱命中处理、referenceUrl 何时强制介入、显式期望字段优先级。
+- 验收阶段除编译外，还应记录最终召回并使用的 `apiId/endpoint/httpMethod/source`，防止检索漂移。
+
+### P8 结论
+- 当前 skill 最误导执行层的点，是把 `DetachDevServerVolume` 当成主路径，导致执行层会把流程 skill 误当成单 API 脚本。
+- 当前 skill 缺少“测试用例描述优化”步骤，执行层很容易直接拿原始 requirement 去检索，造成 KB 命中不稳或命中错 API。
+- 当前 skill 里的场景纠偏说明和真值回填，不应该出现在主流程里，否则执行层会误以为每次都要照抄。
+
+### P10 拍板
+- skill 立即回归“流程资产”，不再绑定 `DeleteWorkflow`、`DetachDevServerVolume` 等具体场景为默认主路径。
+- skill 主流程必须新增“测试用例描述优化”步骤，并与当前实现链路一致：`requirement -> refine -> retrieval -> codegen -> validate -> compile`
+- 具体 API 示例可以保留一则，但必须明确标注为 `Example`，不能放在主流程定义里。
+- 具体 API 真值、真实错误码、真实响应体，只记录到 `meeting.md` 或独立示例文档，不进入 skill 主流程。
+
+### 行动项
+- P10：输出本次讨论结论。
+- 后续执行层：按上述结构重写 skill，删除主流程里的单 API 绑定内容。
+
+### 关键证据
+- `.codex/skills/huawei-testcase-generation/SKILL.md`
+- `docs/TESTCASE_GENERATION_V3_CURRENT.md`
+
+## 2026-03-25 15:32:30 +0800
+
+### 主题
+Sprint-1 第十八批范围纠偏：切回 DetachDevServerVolume 正确 API
+
+### 参与角色
+- P10 主线程：按用户补充的正确文档页重新对齐 API
+
+### 统一结论
+- 用户给的正确页面是 `DetachDevServerVolume`，不是 `DeleteWorkflow`。
+- 官方文档已确认正确 URI 为：
+  - `DELETE /v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}`
+- 我已用真实 token 调 `GET /v1/{project_id}/dev-servers/all` 验证当前项目下确实有 Lite Server 资源，且返回结构同时包含：
+  - 顶层 Lite Server `id`
+  - 底层 `cloud_server.hps_ecs_id`
+  - `volumes[].evs_id`
+- 这说明该接口需要的不是普通 ECS ID，而是 Lite Server 实例 ID + 磁盘 EVS ID。
+
+### 关键证据
+- `https://support.huaweicloud.com/intl/zh-cn/api-modelarts/DetachDevServerVolume.html`
+- `https://support.huaweicloud.com/intl/zh-cn/api-modelarts/ListAllDevServers.html`
+- `X-Request-Id: 22faa6d51ad537ba0ccb00817b1580b9`
+
+## 2026-03-25 15:28:08 +0800
+
+### 主题
+Sprint-1 第十七批范围澄清：当前链路已偏到 DeleteWorkflow，与“卸载系统盘”不一致
+
+### 参与角色
+- P10 主线程：复盘本轮场景漂移原因并收口后续纠偏方向
+
+### 统一结论
+- 用户真实业务场景是“卸载系统盘”，不是“删除工作流”。
+- 当前之所以跑到 `DELETE /v2/{project_id}/workflows/{workflow_id}`，是因为前序链路长期绑定了 `https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html` 及其 `DeleteWorkflow` 相关验收，导致 skill、设计文档、测试样例都围绕 ModelArts workflow 展开。
+- 这属于场景漂移，不是用户需求本身变化。
+
+### 决策
+- 之前所有 `DeleteWorkflow` 的真实返回，只能作为一条独立的 ModelArts 场景样例保留，不能再当作“卸载系统盘”用例的验收依据。
+- 后续若继续做用户真实需求，必须重新切换到“卸载系统盘”对应的华为云服务与 API 文档，再重新做真实请求验收。
+
+### 关键证据
+- `docs/TESTCASE_GENERATION_V3_CURRENT.md`
+- `.codex/skills/huawei-testcase-generation/SKILL.md`
+- `src/test/java/com/agent/service/testcase/TestcaseGenerationServiceImplTest.java`
+
+## 2026-03-25 15:25:36 +0800
+
+### 主题
+Sprint-1 第十六批真实验收：ECS UUID 作为 workflow_id 的返回分支确认
+
+### 参与角色
+- P10 主线程：使用用户提供的 ECS UUID 直接验证删除工作流接口真实返回
+
+### 评审范围
+- 华为云 ModelArts `GET /v2/{project_id}/workflows`
+- 华为云 ModelArts `DELETE /v2/{project_id}/workflows/{workflow_id}`
+- `meeting.md`
+
+### 统一结论
+- `workflow` 不是 ECS 实例，而是 ModelArts 的工作流资源。
+- 用户提供的 `b137d2be-77f0-4fc1-bef7-dc7931993344` 虽然是一个合法 UUID，但在当前项目下不是已存在的 ModelArts workflow。
+- 真实接口返回已确认：
+  - `GET /workflows?limit=5` 返回 `200` 且 `items=[]`
+  - `DELETE /workflows/b137d2be-77f0-4fc1-bef7-dc7931993344` 返回 `400`
+  - `error_code=ModelArts.7512`
+  - `error_msg=Workflow b137d2be-77f0-4fc1-bef7-dc7931993344 not found`
+- 因此当前可以明确区分两类真实分支：
+  - 非 UUID 格式：`400 / ModelArts.0104 / uuid4 tag`
+  - UUID 格式正确但资源不存在：`400 / ModelArts.7512 / Workflow ... not found`
+
+### 关键证据
+- `X-Request-Id: abdb086288832c3ec7289281515167da`
+- `X-Request-Id: 0744b21e6cf54932229850bc6f83f4b0`
+
+## 2026-03-25 15:11:06 +0800
+
+### 主题
+Sprint-1 第十五批收口：生成 skill 与设计文档回填真实 API 真值
+
+### 参与角色
+- P10 主线程：按真实接口验收结果回填 skill 与当前设计基线
+
+### 评审范围
+- `.codex/skills/huawei-testcase-generation/SKILL.md`
+- `docs/TESTCASE_GENERATION_V3_CURRENT.md`
+- `meeting.md`
+
+### 统一结论
+- 已将“删除工作流接口的非法 `workflow_id` 场景”从演示值收口为真实值。
+- Skill 与当前设计文档已统一回填以下真值：
+  - `expectedHttpStatus=400`
+  - `expectedErrorCode=ModelArts.0104`
+  - `expectedErrorDescription=Invalid parameter, error: Key: '' Error:Field validation for '' failed on the 'uuid4' tag.`
+- 后续测试代码生成、skill 使用和验收纪要三处口径已对齐，不再存在“文档写演示值、真实接口回真值”的分叉。
+
+### 行动项
+- P10：已完成真实值回填。
+- 后续执行层：基于该真值继续修正生成结果断言与验收脚本。
+
+### 关键证据
+- `.codex/skills/huawei-testcase-generation/SKILL.md`
+- `docs/TESTCASE_GENERATION_V3_CURRENT.md`
+
+## 2026-03-25 15:08:29 +0800
+
+### 主题
+Sprint-1 第十四批真实验收：从本机文件读取 token 直连 ModelArts 成功
+
+### 参与角色
+- P10 主线程：从 `/root/auth_token.txt` 无损读取 token，直连真实华为云 API
+
+### 评审范围
+- 华为云 ModelArts `GET /v2/{project_id}/workflows`
+- 华为云 ModelArts `DELETE /v2/{project_id}/workflows/{workflow_id}`
+- `meeting.md`
+
+### 统一结论
+- 这次从本机文件无损读取 token 后，鉴权已通过，真实 API 已经跑通。
+- 真实返回值已经拿到，后续测试用例必须以这次真实结果为准，不再使用猜测值。
+- 当前用户给定 `project_id=b1cada1c234f4571a89274cced4861e0` 时，实测结果为：
+  - `GET /workflows?limit=1` 返回 `HTTP 200`
+  - `DELETE /workflows/invalid-id-format` 返回 `HTTP 400`
+  - 错误码：`ModelArts.0104`
+  - 错误描述：`Invalid parameter, error: Key: '' Error:Field validation for '' failed on the 'uuid4' tag.`
+- 经验事实是：本次在 `cn-southwest-2` 与 `cn-north-4` 两个端点上都得到了相同结果；对当前测试用例场景，`400 / ModelArts.0104 / uuid4 tag` 已可作为真实验收口径。
+
+### 验收结果
+- `GET https://modelarts.cn-southwest-2.myhuaweicloud.com/v2/{project_id}/workflows?limit=1`
+  - 结果：`HTTP 200`
+  - 响应体：`{"total":0,"count":0,"items":[],"default_order":"asc"}`
+  - `X-Request-Id: 37a77143f7375708bdfad2c2554cc3d8`
+- `DELETE https://modelarts.cn-southwest-2.myhuaweicloud.com/v2/{project_id}/workflows/invalid-id-format`
+  - 结果：`HTTP 400`
+  - `error_code=ModelArts.0104`
+  - `error_msg=Invalid parameter, error: Key: '' Error:Field validation for '' failed on the 'uuid4' tag.`
+  - `X-Request-Id: 2b87d8da6774da13e626178a8aff26fc`
+- `GET https://modelarts.cn-north-4.myhuaweicloud.com/v2/{project_id}/workflows?limit=1`
+  - 结果：`HTTP 200`
+  - 响应体：`{"total":0,"count":0,"items":[],"default_order":"asc"}`
+  - `X-Request-Id: 0863c6b98116a3f9c455bacb7ebfda7e`
+- `DELETE https://modelarts.cn-north-4.myhuaweicloud.com/v2/{project_id}/workflows/invalid-id-format`
+  - 结果：`HTTP 400`
+  - `error_code=ModelArts.0104`
+  - `error_msg=Invalid parameter, error: Key: '' Error:Field validation for '' failed on the 'uuid4' tag.`
+  - `X-Request-Id: 506bdaed69fcf486c8dc7cfc0ce0330f`
+
+### 核心问题
+
+#### P1
+- 之前通过聊天粘贴传 token 的方式不可靠，已经实锤会把排障方向带偏；敏感 token 必须走本机文件或环境变量注入。
+
+#### P2
+- 当前生成链路里历史使用过的演示值 `400 + 示例错误描述` 与真实上游返回不一致，需要全部以本次真实错误码和错误描述回填。
+
+### 决策
+- 立即以 `400 / ModelArts.0104 / uuid4 tag` 作为“无效 workflow_id”场景的真实用例期望。
+- 后续涉及华为云真实接口验证时，统一使用本机文件或环境变量注入 token，不再经聊天明文传递。
+
+### 行动项
+- P10：已完成真实 API 直连验收并记录真值。
+- 后续执行层：按本次真实返回修正生成 skill、提示词和用例断言。
+
+### 关键证据
+- `37a77143f7375708bdfad2c2554cc3d8`
+- `2b87d8da6774da13e626178a8aff26fc`
+- `0863c6b98116a3f9c455bacb7ebfda7e`
+- `506bdaed69fcf486c8dc7cfc0ce0330f`
+
+## 2026-03-25 14:32:56 +0800
+
+### 主题
+Sprint-1 第十三批真实验收：用户提供的 X-Auth-Token 直连 ModelArts
+
+### 参与角色
+- P10 主线程：使用用户提供的 token 和 `project_id` 直接打真实华为云 API
+
+### 评审范围
+- 华为云 ModelArts `GET /v2/{project_id}/workflows`
+- 华为云 ModelArts `DELETE /v2/{project_id}/workflows/{workflow_id}`
+- `meeting.md`
+
+### 统一结论
+- 已按用户要求直接使用提供的 token 和 `project_id=b1cada1c234f4571a89274cced4861e0` 调真实接口。
+- 真实结果不是 `400`，而是统一返回未鉴权：
+  - `HTTP 401 Unauthorized`
+  - `error_code=APIGW.0301`
+  - `error_msg=Incorrect IAM authentication information: decrypt token fail`
+- 这说明当前提供的 token 没有通过网关解密校验，当前阻塞点是 token 本身不可用，而不是接口参数校验。
+- 虽然用户提供的 `project_id` 对应区域信息显示为 `cn-southwest-2`，但无论请求 `cn-southwest-2` 还是 `cn-north-4` 端点，结果都一致为 `decrypt token fail`，因此当前首要问题仍是 token 有效性，而不是区域路由。
+
+### 验收结果
+- `GET https://modelarts.cn-southwest-2.myhuaweicloud.com/v2/{project_id}/workflows?limit=1`
+  - 结果：`401 / APIGW.0301 / decrypt token fail`
+  - `X-Request-Id: daed988881d0e142f570c98aad9ddf56`
+- `DELETE https://modelarts.cn-southwest-2.myhuaweicloud.com/v2/{project_id}/workflows/invalid-id-format`
+  - 结果：`401 / APIGW.0301 / decrypt token fail`
+  - `X-Request-Id: 6309c90a5885a41a0d7e51a06f88b3b0`
+- `GET https://modelarts.cn-north-4.myhuaweicloud.com/v2/{project_id}/workflows?limit=1`
+  - 结果：`401 / APIGW.0301 / decrypt token fail`
+  - `X-Request-Id: d6a62e33b7d345a40a6e4d3d808f75fa`
+- `DELETE https://modelarts.cn-north-4.myhuaweicloud.com/v2/{project_id}/workflows/invalid-id-format`
+  - 结果：`401 / APIGW.0301 / decrypt token fail`
+  - `X-Request-Id: 9b12de738b88b61f7f38dc239e4a5932`
+
+### 核心问题
+
+#### P1
+- 当前 token 通过不了华为云网关解密校验，后续所有业务接口都会先卡死在鉴权层，看不到真实业务错误码。
+
+#### P1
+- 用户通过聊天直接粘贴了敏感 token，存在复制截断、换行污染或转义损坏的风险；即使 token 本身原本有效，经过聊天链路后也可能已经不可直接用作请求头。
+
+### 决策
+- 下一轮真实验收不再复用这份聊天中传递的 token。
+- 统一改为从本机 shell 或文件中无损读取新 token，再直接请求真实接口。
+
+### 行动项
+- P10：已完成用户 token 的真实接口验收并记录结果。
+- 后续执行层：要求用户重新生成并以无损方式注入 token，再继续验证真实业务分支。
+
+### 关键证据
+- `daed988881d0e142f570c98aad9ddf56`
+- `6309c90a5885a41a0d7e51a06f88b3b0`
+- `d6a62e33b7d345a40a6e4d3d808f75fa`
+- `9b12de738b88b61f7f38dc239e4a5932`
+
+## 2026-03-25 14:23:34 +0800
+
+### 主题
+Sprint-1 第十二批调研记录：X-Auth-Token 与 AK/SK 鉴权关系澄清
+
+### 参与角色
+- P10 主线程：核对官方鉴权文档，澄清 token 链路与签名链路边界
+
+### 评审范围
+- 华为云 IAM 鉴权文档
+- 华为云 ModelArts 认证鉴权文档
+- 本项目当前测试用例生成与验收方式
+
+### 统一结论
+- `X-Auth-Token` 链路与 `AK/SK` 链路不是一回事。
+- 如果目标是拿到请求头 `X-Auth-Token`，官方路径是：使用 IAM 用户名 + 密码 调 `POST /v3/auth/tokens`，再从响应头读取 `X-Subject-Token`。
+- `AK/SK` 是另一套“签名认证”方式，通常用于直接对业务请求做签名；走这条链路时，不需要先去换 `X-Auth-Token`。
+- 对当前项目现状，代码和生成 skill 都是围绕 `HUAWEICLOUD_AUTH_TOKEN` 展开的，所以当前最短路径仍然是“用户名密码取 token”，不是直接上 `AK/SK`。
+
+### 决策
+- 当前阶段继续使用 `X-Auth-Token` 路线完成真实 API 验收。
+- 若后续决定统一改成 `AK/SK` 签名认证，需要同步调整测试代码模板、skill 和验收链路，不能只改配置名不改实现。
+
+### 关键证据
+- 华为云 IAM 文档：`POST /v3/auth/tokens` 返回 `X-Subject-Token`
+- 华为云 ModelArts 文档：支持 `X-Auth-Token` 与签名认证两类鉴权方式
+## 2026-03-25 11:50:49 +0800
+
+### 主题
+Sprint-1 第十一批调研记录：X-Auth-Token 获取路径收口
+
+### 参与角色
+- P10 主线程：核对官方 IAM 鉴权文档，收口可直接执行的 token 获取流程
+
+### 评审范围
+- 华为云 IAM Token 获取文档
+- 华为云 ModelArts 认证鉴权文档
+- 本项目测试用例生成链路的华为云配置约定
+
+### 统一结论
+- `X-Auth-Token` 不是静态配置项，而是先调用 IAM `POST /v3/auth/tokens` 获取，随后从响应头 `X-Subject-Token` 读取出来，再作为业务 API 请求头 `X-Auth-Token` 使用。
+- 对当前 ModelArts `cn-north-4` 场景，推荐直接申请“项目级 token”，再把同一个 `project_id` 同时用于 URL 路径 `/v2/{project_id}/...`。
+- 当前项目与该流程匹配的运行时配置键已经存在：
+  - 环境变量：`HUAWEICLOUD_AUTH_TOKEN`、`HUAWEICLOUD_PROJECT_ID`、`HUAWEICLOUD_BASE_URL`
+  - 系统属性：`hwcloud.auth.token`、`hwcloud.project.id`、`hwcloud.base.url`
+
+### 验收结果
+- 官方流程已收口为 3 步：
+  - 第一步：准备 `domain name / IAM user / password / region(project scope) / project_id`
+  - 第二步：调用 IAM `POST /v3/auth/tokens`
+  - 第三步：从响应头取 `X-Subject-Token`，作为后续业务请求头 `X-Auth-Token`
+- 对当前项目的最小落地方式已明确：
+  - `export HUAWEICLOUD_AUTH_TOKEN=<X-Subject-Token>`
+  - `export HUAWEICLOUD_PROJECT_ID=<你的项目ID>`
+  - `export HUAWEICLOUD_BASE_URL=https://modelarts.cn-north-4.myhuaweicloud.com`
+
+### 核心问题
+
+#### P1
+- 如果当前手里只有“华为云账号”登录态，而没有可编程访问的 IAM 用户、密码和区域项目信息，就无法稳定走自动化 token 获取链路。
+
+#### P1
+- `X-Auth-Token` 有有效期，不能写死在模板里长期复用；正式接入时要么做运行前刷新，要么在测试前人工更新一次。
+
+### 决策
+- 后续真实 API 验收统一按“先取 token，再调业务接口”执行，不再直接裸调业务 API。
+- 下一次若要验证 `400` 业务分支，前置条件明确为：先拿到有效 `X-Auth-Token` 与正确 `project_id`。
+
+### 行动项
+- P10：已完成 token 获取路径调研并记录纪要。
+- 后续执行层：拿到用户真实 IAM 信息后，先跑一次获取 token，再继续打 ModelArts 真实请求。
+
+### 关键证据
+- 华为云 IAM 文档：`POST /v3/auth/tokens` 响应头返回 `X-Subject-Token`
+- 华为云 ModelArts 文档：业务请求头使用 `X-Auth-Token`
+
+## 2026-03-25 11:45:00 +0800
+
+### 主题
+Sprint-1 第十批交付验收：华为云真实 API 直连核验
+
+### 参与角色
+- P10 主线程：按用户要求跳过演示假设，直接核验真实华为云 API 返回
+
+### 评审范围
+- 华为云 ModelArts API：`DELETE /v2/{project_id}/workflows/{workflow_id}`
+- `meeting.md`
+
+### 统一结论
+- 已按要求直接调用真实华为云 API，而不是继续围绕本地生成演示值打转。
+- 当前这次真实直连在“未携带 IAM 鉴权头”的前提下，返回的是未鉴权错误，不是业务参数校验错误。
+- 真实返回已确认：
+  - HTTP 状态码：`401 Unauthorized`
+  - 错误码：`APIGW.0301`
+  - 错误描述：`Incorrect IAM authentication information: x-auth-token not found`
+- 因此，前面本地生成链路中使用的 `400 + 示例错误描述` 只能算演示输入，不代表华为云真实返回口径。
+
+### 验收结果
+- 真实 API 请求
+  - 命令：
+    - `curl -sS -i -m 20 -X DELETE 'https://modelarts.cn-north-4.myhuaweicloud.com/v2/00000000000000000000000000000000/workflows/invalid-id-format'`
+  - 结果：通过，拿到真实响应
+- 真实响应摘要
+  - `HTTP/1.1 401 Unauthorized`
+  - `X-Request-Id: 0b67bf0abe6d9a8844030ded87109c9f`
+  - `error_code=APIGW.0301`
+  - `error_msg=Incorrect IAM authentication information: x-auth-token not found`
+
+### 核心问题
+
+#### P1
+- 当前项目之前围绕 `400 + 示例错误描述` 做了生成演示，但没有先验证真实上游返回，导致“演示合同”和“真实接口行为”发生偏差。
+
+#### P1
+- 这次请求没有带 `X-Auth-Token`，所以当前只验证到了“未鉴权失败”分支；如果目标是校验 `400` 或更细的业务错误描述，下一步必须补真实鉴权，再打一次已鉴权请求。
+
+### 决策
+- 从这一刻起，测试用例的默认真实口径以这次直连结果为准：未鉴权场景先落 `401 / APIGW.0301 / x-auth-token not found`。
+- 只有在拿到有效 IAM 鉴权后，才继续定义“已鉴权但参数非法”场景对应的 `400` 或其他业务错误码断言。
+
+### 行动项
+- P10：已完成真实 API 直连核验并记录纪要。
+- 后续执行层：基于这次真实返回修正测试用例场景拆分，避免再把演示值当成真实值。
+- 若要继续打 `400` 业务分支：补齐真实 `X-Auth-Token` 和有效 `project_id` 后再次直连验收。
+
+### 关键证据
+- 真实响应 `X-Request-Id: 0b67bf0abe6d9a8844030ded87109c9f`
+- 华为云真实响应体：`{"error_msg":"Incorrect IAM authentication information: x-auth-token not found","error_code":"APIGW.0301","request_id":"0b67bf0abe6d9a8844030ded87109c9f"}`
+
 ## 2026-03-25 10:46:42 +0800
 
 ### 主题

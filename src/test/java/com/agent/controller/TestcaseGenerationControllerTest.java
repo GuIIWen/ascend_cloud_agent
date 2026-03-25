@@ -42,6 +42,7 @@ class TestcaseGenerationControllerTest {
         assertEquals("assertEquals(200, response.getStatusCode());", body.getJavaTestCode());
         assertEquals(2, body.getCitations().size());
         assertFalse(body.isDegraded());
+        assertEquals("优化后的测试用例描述", body.getRefinedRequirement());
         TestcaseCitationResponse firstCitation = body.getCitations().get(0);
         assertEquals(TestcaseCitation.TYPE_KNOWLEDGE_BASE, firstCitation.getType());
         assertEquals("api-modelarts-create", firstCitation.getApiId());
@@ -162,7 +163,8 @@ class TestcaseGenerationControllerTest {
                                     "https://support.huaweicloud.com/api-modelarts/CreateWorkflow.html"),
                             TestcaseCitation.referenceUrl(
                                     "https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html")),
-                    false);
+                    false,
+                    "优化后的测试用例描述");
         }
     }
 

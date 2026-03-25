@@ -24,7 +24,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -32,6 +36,14 @@ import java.util.stream.Collectors;
  */
 public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     private static final Logger logger = LoggerFactory.getLogger(KnowledgeBaseServiceImpl.class);
+    private static final int MIN_VECTOR_RECALL_SIZE = 20;
+    private static final List<String> DISK_HINTS = List.of("系统盘", "磁盘", "卷", "volume", "disk");
+    private static final List<String> SERVER_HINTS = List.of("lite server", "开发服务器", "dev server", "dev-server", "dev-servers");
+    private static final List<String> DETACH_HINTS = List.of("卸载", "detach");
+    private static final List<String> DELETE_HINTS = List.of("删除", "delete");
+    private static final List<String> DETACH_VOLUME_HINTS = List.of("磁盘", "volume", "disk", "detachvolume");
+    private static final List<String> DEV_SERVER_HINTS = List.of("lite server", "dev server", "dev-server", "dev-servers", "开发服务器");
+    private static final List<String> IRRELEVANT_STORAGE_HINTS = List.of("obs", "notebook", "/services/", "工作流", "workflow");
     private final KnowledgeBaseConfig config;
     private final DocumentProcessor documentProcessor;
     private final WebDocumentCrawler webCrawler;
@@ -155,42 +167,42 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     @Override
     public List<ApiMetadata> search(String query, int topK) {
         logger.debug("Searching for: {}", query);
-        Embedding queryEmbedding;
-        try {
-            queryEmbedding = embeddingModel.embed(query).content();
-        } catch (Exception e) {
-            logger.error("Failed to embed query '{}', degrading to empty result", query, e);
+        if (query == null || query.trim().isEmpty() || topK <= 0) {
             return List.of();
         }
 
-        List<EmbeddingMatch<TextSegment>> matches = vectorStore.search(queryEmbedding, topK);
+        String normalizedQuery = query.trim();
+        List<String> queryVariants = buildQueryVariants(normalizedQuery);
+        int recallSize = Math.max(topK * 4, MIN_VECTOR_RECALL_SIZE);
+        List<SearchCandidate> uniqueCandidates = new ArrayList<>();
 
-        List<ApiMetadata> results = new ArrayList<>();
-        for (EmbeddingMatch<TextSegment> match : matches) {
-            TextSegment segment = match.embedded();
-            String apiId = segment.metadata("apiId");
-
-            if (apiId != null) {
-                try {
-                    ApiMetadata metadata = metadataStore.findByApiId(apiId);
-                    if (metadata != null) {
-                        results.add(metadata);
-                    } else {
-                        logger.warn("Metadata missing for apiId='{}', returning degraded vector hit", apiId);
-                        results.add(buildDegradedResult(apiId, segment));
-                    }
-                } catch (Exception e) {
-                    logger.error("Failed to load metadata for apiId='{}', returning degraded vector hit", apiId, e);
-                    results.add(buildDegradedResult(apiId, segment));
-                }
-            } else {
-                logger.warn("Vector hit without apiId metadata, returning degraded result for source={}",
-                        segment.metadata("source"));
-                results.add(buildDegradedResult(null, segment));
+        for (String queryVariant : queryVariants) {
+            Embedding queryEmbedding = embedQuery(queryVariant);
+            if (queryEmbedding == null) {
+                continue;
             }
+            List<EmbeddingMatch<TextSegment>> matches = vectorStore.search(queryEmbedding, recallSize);
+            collectCandidates(uniqueCandidates, matches);
         }
 
-        logger.info("Found {} results for query", results.size());
+        List<ApiMetadata> results = uniqueCandidates.stream()
+                .map(candidate -> toRankedResult(normalizedQuery, candidate))
+                .filter(Objects::nonNull)
+                .sorted((left, right) -> {
+                    int byScore = Double.compare(right.score(), left.score());
+                    if (byScore != 0) {
+                        return byScore;
+                    }
+                    return Double.compare(right.vectorScore(), left.vectorScore());
+                })
+                .map(RankedResult::metadata)
+                .limit(topK)
+                .collect(Collectors.toList());
+
+        logger.info("Found {} results for query after ranking {} unique candidates across {} variants",
+                results.size(),
+                uniqueCandidates.size(),
+                queryVariants.size());
         return results;
     }
 
@@ -237,11 +249,204 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         }
     }
 
+    private Embedding embedQuery(String query) {
+        try {
+            return embeddingModel.embed(query).content();
+        } catch (Exception e) {
+            logger.error("Failed to embed query '{}', skipping variant", query, e);
+            return null;
+        }
+    }
+
+    private void collectCandidates(
+            List<SearchCandidate> candidates,
+            List<EmbeddingMatch<TextSegment>> matches) {
+        for (EmbeddingMatch<TextSegment> match : matches) {
+            TextSegment segment = match.embedded();
+            String key = buildCandidateKey(segment);
+            if (key == null) {
+                continue;
+            }
+            SearchCandidate candidate = new SearchCandidate(key, match);
+            int existingIndex = findCandidateIndex(candidates, key);
+            if (existingIndex >= 0) {
+                if (candidate.score() > candidates.get(existingIndex).score()) {
+                    candidates.set(existingIndex, candidate);
+                }
+                continue;
+            }
+            candidates.add(candidate);
+        }
+    }
+
+    private int findCandidateIndex(List<SearchCandidate> candidates, String key) {
+        for (int i = 0; i < candidates.size(); i++) {
+            if (candidates.get(i).key().equals(key)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private RankedResult toRankedResult(String query, SearchCandidate candidate) {
+        TextSegment segment = candidate.segment();
+        String apiId = segment.metadata("apiId");
+        ApiMetadata metadata = loadMetadata(apiId, segment);
+        if (metadata == null) {
+            return null;
+        }
+        return new RankedResult(metadata, scoreCandidate(query, metadata, candidate), candidate.score());
+    }
+
+    private ApiMetadata loadMetadata(String apiId, TextSegment segment) {
+        if (apiId == null) {
+            logger.warn("Vector hit without apiId metadata, returning degraded result for source={}",
+                    segment.metadata("source"));
+            return buildDegradedResult(null, segment);
+        }
+
+        try {
+            ApiMetadata metadata = metadataStore.findByApiId(apiId);
+            if (metadata != null) {
+                return metadata;
+            }
+            logger.warn("Metadata missing for apiId='{}', returning degraded vector hit", apiId);
+            return buildDegradedResult(apiId, segment);
+        } catch (Exception e) {
+            logger.error("Failed to load metadata for apiId='{}', returning degraded vector hit", apiId, e);
+            return buildDegradedResult(apiId, segment);
+        }
+    }
+
     private String buildIndexContent(ApiMetadata metadata) {
         String description = metadata.getDescription() != null ? metadata.getDescription() : "";
         String className = metadata.getClassName() != null ? metadata.getClassName() : "";
         String methodName = metadata.getMethodName() != null ? metadata.getMethodName() : "";
         return (description + " " + className + "." + methodName).trim();
+    }
+
+    private List<String> buildQueryVariants(String query) {
+        LinkedHashSet<String> variants = new LinkedHashSet<>();
+        String trimmed = query.trim();
+        String normalized = normalize(trimmed);
+        variants.add(trimmed);
+
+        boolean diskLike = containsAny(normalized, DISK_HINTS);
+        boolean serverLike = containsAny(normalized, SERVER_HINTS) || normalized.contains("服务器");
+        boolean detachLike = containsAny(normalized, DETACH_HINTS);
+
+        if (normalized.contains("系统盘")) {
+            variants.add(trimmed.replace("系统盘", "磁盘"));
+        }
+        if (normalized.contains("卷")) {
+            variants.add(trimmed.replace("卷", "磁盘"));
+        }
+        if (diskLike && detachLike) {
+            variants.add("卸载磁盘");
+        }
+        if (diskLike) {
+            variants.add("Lite Server 卸载磁盘");
+        }
+        if (diskLike && (serverLike || normalized.contains("开发服务器"))) {
+            variants.add("开发服务器 卸载 磁盘");
+        } else if (diskLike) {
+            variants.add("开发服务器 卸载 磁盘");
+        }
+
+        return variants.stream()
+                .filter(this::hasText)
+                .limit(6)
+                .collect(Collectors.toList());
+    }
+
+    private double scoreCandidate(String query, ApiMetadata metadata, SearchCandidate candidate) {
+        String normalizedQuery = normalize(query);
+        String searchable = normalize(buildSearchableText(metadata, candidate.segment()));
+
+        double score = candidate.score();
+        if (containsAny(normalizedQuery, DETACH_HINTS)) {
+            score += countMatches(searchable, DETACH_HINTS) * 0.8;
+        }
+        if (containsAny(normalizedQuery, DISK_HINTS)) {
+            score += countMatches(searchable, DETACH_VOLUME_HINTS) * 1.2;
+            if (normalizedQuery.contains("系统盘")) {
+                score += countMatches(searchable, List.of("磁盘", "volume", "disk", "detachvolume")) * 1.4;
+            }
+            if (containsAny(searchable, IRRELEVANT_STORAGE_HINTS) && !containsAny(searchable, DEV_SERVER_HINTS)) {
+                score -= 3.0;
+            }
+        }
+        if (containsAny(normalizedQuery, SERVER_HINTS) || normalizedQuery.contains("服务器")) {
+            score += countMatches(searchable, DEV_SERVER_HINTS) * 1.4;
+            if (containsAny(searchable, List.of("/services/", "service", "workflow")) && !containsAny(searchable, DEV_SERVER_HINTS)) {
+                score -= 3.5;
+            }
+        }
+        if (normalizedQuery.contains("卷")) {
+            score += countMatches(searchable, List.of("volume", "磁盘", "detachvolume")) * 1.1;
+        }
+        if (containsAny(normalizedQuery, DELETE_HINTS) && containsAny(searchable, DELETE_HINTS) && !containsAny(searchable, DETACH_HINTS)) {
+            score += 0.4;
+        }
+        if (containsAny(normalizedQuery, DETACH_HINTS) && containsAny(searchable, DELETE_HINTS) && !containsAny(searchable, DETACH_HINTS)) {
+            score -= 1.4;
+        }
+        if (containsAny(searchable, List.of("/dev-servers/", "detachvolume"))) {
+            score += 1.0;
+        }
+        return score;
+    }
+
+    private String buildSearchableText(ApiMetadata metadata, TextSegment segment) {
+        return String.join(" ",
+                safe(metadata.getDescription()),
+                safe(metadata.getClassName()),
+                safe(metadata.getMethodName()),
+                safe(metadata.getHttpMethod()),
+                safe(metadata.getEndpoint()),
+                safe(metadata.getSourceLocation()),
+                segment != null ? safe(segment.text()) : "");
+    }
+
+    private String buildCandidateKey(TextSegment segment) {
+        if (segment == null) {
+            return null;
+        }
+        String apiId = segment.metadata("apiId");
+        if (hasText(apiId)) {
+            return apiId.trim();
+        }
+        String source = segment.metadata("source");
+        String text = segment.text();
+        if (!hasText(source) && !hasText(text)) {
+            return null;
+        }
+        return safe(source) + "#" + safe(text);
+    }
+
+    private boolean containsAny(String text, List<String> keywords) {
+        return keywords.stream().anyMatch(keyword -> text.contains(normalize(keyword)));
+    }
+
+    private int countMatches(String text, List<String> keywords) {
+        return (int) keywords.stream()
+                .map(this::normalize)
+                .filter(keyword -> !keyword.isEmpty())
+                .filter(text::contains)
+                .distinct()
+                .count();
+    }
+
+    private String normalize(String value) {
+        return safe(value).toLowerCase(Locale.ROOT);
+    }
+
+    private String safe(String value) {
+        return value == null ? "" : value;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
     }
 
     private ApiMetadata buildDegradedResult(String apiId, TextSegment segment) {
@@ -263,5 +468,18 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
             logger.warn("Unknown source type '{}' found in vector metadata, degrading to null", value);
             return null;
         }
+    }
+
+    private record SearchCandidate(String key, EmbeddingMatch<TextSegment> match) {
+        private TextSegment segment() {
+            return match.embedded();
+        }
+
+        private double score() {
+            return match.score();
+        }
+    }
+
+    private record RankedResult(ApiMetadata metadata, double score, double vectorScore) {
     }
 }

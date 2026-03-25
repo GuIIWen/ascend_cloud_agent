@@ -42,29 +42,39 @@ Generated tests should read runtime values from env vars or system properties:
 
 ## Standard Flow
 
-1. Confirm the reference page is a concrete API page.
-- Prefer pages that describe request path, parameters, and error semantics.
-- If page is only overview/index, ask for a concrete API detail page when strict assertions are required.
+1. Requirement refinement (测试用例描述优化).
+- Produce a structured description (service, resource, operation, preconditions, inputs, expected outcomes).
+- If expected status/error semantics are not explicit and cannot be inferred from context, require the user to supply `referenceUrl` or explicit expectations.
 
-2. Build request payload.
-- Always include `requirement`.
-- Include `referenceUrl` when KB hit is uncertain.
+2. Retrieval from KB.
+- Query KB using the refined description, not the raw requirement.
+- Treat a hit as **concrete** only when `apiId` exists and at least one of `httpMethod/endpoint/requestBody/responseBody/className/methodName/signature` is present.
+- Treat missing/weak hits as KB miss to avoid API drift.
+
+3. Reference URL fallback.
+- If KB miss or weak hit, require `referenceUrl`.
+- If `referenceUrl` is an overview/index page, ask for a concrete API detail page.
+- Fetch and truncate page content as temporary context (do not persist it).
+
+4. Build request payload.
+- Always include `requirement` (use the refined description content if required by your prompt).
+- Include `referenceUrl` only when needed (KB miss/weak hit).
 - Include explicit expectations (`expectedHttpStatus`, `expectedErrorCode`, `expectedErrorDescription`) when provided by user.
 
-3. Call local generation API.
+5. Call local generation API.
 - Save response body for traceability and later compile validation.
 
-4. Validate response structure.
+6. Validate response structure.
 - Success body should include top-level fields:
   - `javaTestCode`
   - `citations`
   - `degraded`
 
-5. Validate generated code safety.
+7. Validate generated code safety and expectations.
 - Reject code containing `TODO` or placeholder tokens.
 - Confirm explicit expectations appear in assertions when explicitly provided.
 
-6. Compile with Java 21.
+8. Compile with Java 21.
 - Extract class name from generated code.
 - Save as `/tmp/<ClassName>.java`.
 - Compile with JUnit API jars from local Maven cache.
@@ -73,22 +83,29 @@ Generated tests should read runtime values from env vars or system properties:
 
 - If `referenceUrl` is missing and KB has no concrete hit:
   - service returns `TESTCASE_REFERENCE_URL_REQUIRED` (no testcase code should be produced)
+- If KB hit is weak (missing concrete API metadata), treat it as a miss and require `referenceUrl`.
 - If explicit expectations are not provided and context has no clear status/error semantics:
   - do not fabricate concrete status code, error code, or error description.
 
-## Minimal Curl Example
+## Minimal Curl Example (Example Only, Not a Default API)
 
 ```bash
 curl -sS -o /tmp/testcase.out -w 'http_status=%{http_code}\n' -m 260 \
   -H 'Content-Type: application/json' \
   -X POST http://127.0.0.1:8080/api/testcase/generate \
   --data '{
-    "requirement":"验证删除工作流接口在参数非法时返回400，并校验错误描述",
-    "referenceUrl":"https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html",
-    "expectedHttpStatus":400,
-    "expectedErrorDescription":"示例错误描述"
+    "requirement":"示例：验证某 API 在参数非法时返回错误并校验错误描述",
+    "referenceUrl":"https://support.huaweicloud.com/api-modelarts/DetachDevServerVolume.html"
   }'
 ```
+
+## Example (Not the Default Path)
+
+Example API documentation (for illustration only):
+- `https://support.huaweicloud.com/api-modelarts/DetachDevServerVolume.html`
+
+If you use this example, make sure the real scenario matches the API semantics.
+Do not treat this URL as the default when the requirement is unrelated.
 
 ## Minimal Compile Validation Example
 

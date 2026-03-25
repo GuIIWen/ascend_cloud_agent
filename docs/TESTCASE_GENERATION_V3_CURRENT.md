@@ -38,8 +38,11 @@ Endpoint:
 Request JSON:
 ```json
 {
-  "requirement": "Given a valid token, create a workflow and verify it appears in list",
-  "referenceUrl": "https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html"
+  "requirement": "Validate delete workflow returns 400 for invalid workflow_id",
+  "referenceUrl": "https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html",
+  "expectedHttpStatus": 400,
+  "expectedErrorCode": "ModelArts.0104",
+  "expectedErrorDescription": "Invalid parameter, error: Key: '' Error:Field validation for '' failed on the 'uuid4' tag."
 }
 ```
 
@@ -68,6 +71,14 @@ Notes:
 - `degraded` semantics:
   - `false`: generation used normal KB hit RAG context as primary source.
   - `true`: generation succeeded but used fallback/partial context (for example KB miss + referenceUrl temporary context).
+- Optional expectation fields are part of the current request contract:
+  - `expectedHttpStatus`
+  - `expectedErrorCode`
+  - `expectedErrorDescription`
+- Real validated truth for the negative case `DELETE /v2/{project_id}/workflows/invalid-id-format` is:
+  - HTTP `400`
+  - `error_code=ModelArts.0104`
+  - `error_msg=Invalid parameter, error: Key: '' Error:Field validation for '' failed on the 'uuid4' tag.`
 
 ## 4. Generation Chain (Single Request, No Orchestration)
 

@@ -32,9 +32,11 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -70,7 +72,7 @@ class KnowledgeBaseServiceImplWeakConsistencyTest {
         TextSegment segment = TextSegment.from("fallback summary", segmentMetadata);
 
         when(embeddingModel.embed("workflow")).thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
-        when(vectorStore.search(any(Embedding.class), eq(3))).thenReturn(List.of(
+        when(vectorStore.search(any(Embedding.class), eq(20))).thenReturn(List.of(
                 new EmbeddingMatch<>(0.98, "match-1", Embedding.from(new float[]{0.1f}), segment)));
 
         List<ApiMetadata> results = service.search("workflow", 3);
@@ -92,7 +94,7 @@ class KnowledgeBaseServiceImplWeakConsistencyTest {
         TextSegment segment = TextSegment.from("degraded from vector", segmentMetadata);
 
         when(embeddingModel.embed("workflow")).thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
-        when(vectorStore.search(any(Embedding.class), eq(4))).thenReturn(List.of(
+        when(vectorStore.search(any(Embedding.class), eq(20))).thenReturn(List.of(
                 new EmbeddingMatch<>(0.77, "missing", Embedding.from(new float[]{0.1f}), segment)));
         when(metadataStore.findByApiId("api-missing")).thenReturn(null);
 
@@ -120,7 +122,7 @@ class KnowledgeBaseServiceImplWeakConsistencyTest {
         brokenMetadata.put("source", "memory://broken");
 
         when(embeddingModel.embed("workflow")).thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
-        when(vectorStore.search(any(Embedding.class), eq(5))).thenReturn(List.of(
+        when(vectorStore.search(any(Embedding.class), eq(20))).thenReturn(List.of(
                 new EmbeddingMatch<>(0.99, "good", Embedding.from(new float[]{0.1f}), TextSegment.from("good", goodMetadata)),
                 new EmbeddingMatch<>(0.42, "broken", Embedding.from(new float[]{0.1f}), TextSegment.from("broken", brokenMetadata))));
         when(metadataStore.findByApiId("api-good")).thenReturn(ApiMetadata.builder()
@@ -180,6 +182,137 @@ class KnowledgeBaseServiceImplWeakConsistencyTest {
         assertEquals(1, stats.getFailureCount());
         assertEquals(2, stats.getTotalDocuments());
         verify(documentProcessor, times(2)).processAndStore(any(Document.class));
+    }
+
+    @Test
+    void searchDeduplicatesRepeatedApiIds() throws SQLException {
+        KnowledgeBaseServiceImpl service = new KnowledgeBaseServiceImpl(
+                config, documentProcessor, webCrawler, vectorStore, metadataStore, embeddingModel);
+
+        Metadata apiOneMetadata = new Metadata();
+        apiOneMetadata.put("apiId", "api-one");
+        apiOneMetadata.put("source", "memory://api-one");
+        Metadata apiTwoMetadata = new Metadata();
+        apiTwoMetadata.put("apiId", "api-two");
+        apiTwoMetadata.put("source", "memory://api-two");
+
+        when(embeddingModel.embed("workflow")).thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
+        when(vectorStore.search(any(Embedding.class), eq(20))).thenReturn(List.of(
+                new EmbeddingMatch<>(0.99, "api-one-1", Embedding.from(new float[]{0.1f}), TextSegment.from("one", apiOneMetadata)),
+                new EmbeddingMatch<>(0.98, "api-one-2", Embedding.from(new float[]{0.1f}), TextSegment.from("one again", apiOneMetadata)),
+                new EmbeddingMatch<>(0.70, "api-two", Embedding.from(new float[]{0.1f}), TextSegment.from("two", apiTwoMetadata))));
+        when(metadataStore.findByApiId("api-one")).thenReturn(apiMetadata(
+                "api-one",
+                "ListWorkflow",
+                "列出工作流",
+                "/v1/workflows"));
+        when(metadataStore.findByApiId("api-two")).thenReturn(apiMetadata(
+                "api-two",
+                "DeleteWorkflow",
+                "删除工作流",
+                "/v1/workflows/{id}"));
+
+        List<ApiMetadata> results = service.search("workflow", 3);
+
+        assertEquals(2, results.size());
+        assertEquals("api-one", results.getFirst().getApiId());
+        assertEquals("api-two", results.get(1).getApiId());
+    }
+
+    @Test
+    void searchExpandsSystemDiskQueryToRecoverDetachVolumeApi() throws SQLException {
+        KnowledgeBaseServiceImpl service = new KnowledgeBaseServiceImpl(
+                config, documentProcessor, webCrawler, vectorStore, metadataStore, embeddingModel);
+
+        Metadata cancelObsMetadata = new Metadata();
+        cancelObsMetadata.put("apiId", "cancel-obs");
+        cancelObsMetadata.put("source", "memory://cancel-obs");
+        Metadata detachMetadata = new Metadata();
+        detachMetadata.put("apiId", "detach-volume");
+        detachMetadata.put("source", "memory://detach-volume");
+
+        when(embeddingModel.embed(anyString())).thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
+        when(vectorStore.search(any(Embedding.class), eq(20))).thenReturn(
+                List.of(new EmbeddingMatch<>(0.99, "cancel-obs", Embedding.from(new float[]{0.1f}), TextSegment.from("cancel obs", cancelObsMetadata))),
+                List.of(new EmbeddingMatch<>(0.95, "detach-volume", Embedding.from(new float[]{0.1f}), TextSegment.from("detach volume", detachMetadata))),
+                List.of(new EmbeddingMatch<>(0.94, "detach-volume-2", Embedding.from(new float[]{0.1f}), TextSegment.from("detach volume again", detachMetadata))),
+                List.of(),
+                List.of());
+        when(metadataStore.findByApiId("cancel-obs")).thenReturn(apiMetadata(
+                "cancel-obs",
+                "CancelObs",
+                "动态卸载OBS接口",
+                "/v1/{project_id}/notebooks/{instance_id}/storage/{storage_id}"));
+        when(metadataStore.findByApiId("detach-volume")).thenReturn(apiMetadata(
+                "detach-volume",
+                "DetachDevServerVolume",
+                "Lite Server服务器卸载磁盘接口",
+                "/v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}"));
+
+        List<ApiMetadata> results = service.search("卸载系统盘", 3);
+
+        assertEquals(2, results.size());
+        assertEquals("detach-volume", results.getFirst().getApiId());
+        assertEquals("cancel-obs", results.get(1).getApiId());
+        verify(vectorStore, atLeast(2)).search(any(Embedding.class), eq(20));
+    }
+
+    @Test
+    void searchExpandsServerVolumeQueryToPreferDetachVolumeOverDeleteService() throws SQLException {
+        KnowledgeBaseServiceImpl service = new KnowledgeBaseServiceImpl(
+                config, documentProcessor, webCrawler, vectorStore, metadataStore, embeddingModel);
+
+        Metadata deleteServiceMetadata = new Metadata();
+        deleteServiceMetadata.put("apiId", "delete-service");
+        deleteServiceMetadata.put("source", "memory://delete-service");
+        Metadata detachMetadata = new Metadata();
+        detachMetadata.put("apiId", "detach-volume");
+        detachMetadata.put("source", "memory://detach-volume");
+        Metadata deleteDevServerMetadata = new Metadata();
+        deleteDevServerMetadata.put("apiId", "delete-dev-server");
+        deleteDevServerMetadata.put("source", "memory://delete-dev-server");
+
+        when(embeddingModel.embed(anyString())).thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
+        when(vectorStore.search(any(Embedding.class), eq(20))).thenReturn(
+                List.of(new EmbeddingMatch<>(0.99, "delete-service", Embedding.from(new float[]{0.1f}), TextSegment.from("delete service", deleteServiceMetadata))),
+                List.of(new EmbeddingMatch<>(0.96, "delete-dev-server", Embedding.from(new float[]{0.1f}), TextSegment.from("delete dev server", deleteDevServerMetadata))),
+                List.of(new EmbeddingMatch<>(0.95, "detach-volume", Embedding.from(new float[]{0.1f}), TextSegment.from("detach volume", detachMetadata))),
+                List.of(new EmbeddingMatch<>(0.94, "detach-volume-2", Embedding.from(new float[]{0.1f}), TextSegment.from("detach volume again", detachMetadata))),
+                List.of());
+        when(metadataStore.findByApiId("delete-service")).thenReturn(apiMetadata(
+                "delete-service",
+                "DeleteService",
+                "删除模型服务",
+                "/v1/{project_id}/services/{service_id}"));
+        when(metadataStore.findByApiId("delete-dev-server")).thenReturn(apiMetadata(
+                "delete-dev-server",
+                "DeleteDevServer",
+                "删除Lite Server实例接口",
+                "/v1/{project_id}/dev-servers/{id}"));
+        when(metadataStore.findByApiId("detach-volume")).thenReturn(apiMetadata(
+                "detach-volume",
+                "DetachDevServerVolume",
+                "Lite Server服务器卸载磁盘接口",
+                "/v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}"));
+
+        List<ApiMetadata> results = service.search("卸载开发服务器卷", 3);
+
+        assertEquals(3, results.size());
+        assertEquals("detach-volume", results.getFirst().getApiId());
+        assertEquals("delete-dev-server", results.get(1).getApiId());
+        assertEquals("delete-service", results.get(2).getApiId());
+    }
+
+    private ApiMetadata apiMetadata(String apiId, String methodName, String description, String endpoint) {
+        return ApiMetadata.builder()
+                .apiId(apiId)
+                .className(methodName.toUpperCase())
+                .methodName(methodName)
+                .description(description)
+                .httpMethod("DELETE")
+                .endpoint(endpoint)
+                .sourceLocation("memory://" + apiId)
+                .build();
     }
 
     private ListAppender<ILoggingEvent> attachLogAppender() {

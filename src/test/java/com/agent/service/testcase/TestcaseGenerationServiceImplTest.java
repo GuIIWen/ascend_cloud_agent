@@ -74,6 +74,7 @@ class TestcaseGenerationServiceImplTest {
         assertNotNull(result);
         assertFalse(result.isDegraded());
         assertTrue(result.getJavaTestCode().contains("public class WorkflowListTest"));
+        assertEquals("优化后的需求", result.getRefinedRequirement());
         assertEquals(1, result.getCitations().size());
         assertEquals(TestcaseCitation.TYPE_KNOWLEDGE_BASE, result.getCitations().get(0).getType());
         assertEquals("api-list-workflows", result.getCitations().get(0).getApiId());
@@ -101,6 +102,7 @@ class TestcaseGenerationServiceImplTest {
         assertNotNull(result);
         assertTrue(result.isDegraded());
         assertTrue(result.getJavaTestCode().contains("public class WorkflowCreateTest"));
+        assertEquals("优化后的需求", result.getRefinedRequirement());
         assertEquals(1, result.getCitations().size());
         assertEquals(TestcaseCitation.TYPE_REFERENCE_URL, result.getCitations().get(0).getType());
         assertEquals(referenceUrl, result.getCitations().get(0).getSource());
@@ -142,6 +144,7 @@ class TestcaseGenerationServiceImplTest {
         assertNotNull(result);
         assertFalse(result.isDegraded());
         assertTrue(result.getJavaTestCode().contains("public class DeleteWorkflowTest"));
+        assertEquals("优化后的需求", result.getRefinedRequirement());
         assertEquals(1, result.getCitations().size());
         assertEquals(TestcaseCitation.TYPE_KNOWLEDGE_BASE, result.getCitations().get(0).getType());
         assertEquals("api-delete-workflow", result.getCitations().get(0).getApiId());
@@ -177,6 +180,7 @@ class TestcaseGenerationServiceImplTest {
         TestcaseGenerationResult result = service.generate(
                 new TestcaseGenerationRequest("验证删除工作流", referenceUrl));
 
+        assertEquals("优化后的需求", result.getRefinedRequirement());
         assertTrue(result.getJavaTestCode().contains("requiredConfig(\"HUAWEICLOUD_PROJECT_ID\", \"hwcloud.project.id\")"));
         assertTrue(result.getJavaTestCode().contains("requiredConfig(\"HUAWEICLOUD_AUTH_TOKEN\", \"hwcloud.auth.token\")"));
         assertFalse(result.getJavaTestCode().toLowerCase().contains("placeholder"));
@@ -200,11 +204,52 @@ class TestcaseGenerationServiceImplTest {
                 new TestcaseGenerationRequest("验证删除工作流", referenceUrl, 400, "MODELARTS_001", "示例错误描述"));
 
         assertNotNull(result);
+        assertEquals("优化后的需求", result.getRefinedRequirement());
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         verify(llmService, times(2)).generateTestCode(promptCaptor.capture());
         String generationPrompt = promptCaptor.getAllValues().get(1);
         assertTrue(generationPrompt.contains("expectedHttpStatus: 400"));
         assertTrue(generationPrompt.contains("expectedErrorCode: MODELARTS_001"));
         assertTrue(generationPrompt.contains("expectedErrorDescription: 示例错误描述"));
+    }
+
+    @Test
+    void generateUsesOnlyTopKnowledgeBaseHitForContextAndCitations() {
+        ApiMetadata topHit = ApiMetadata.builder()
+                .apiId("api-detach-volume")
+                .className("DevServerApi")
+                .methodName("detachVolume")
+                .description("detach volume")
+                .httpMethod("DELETE")
+                .endpoint("/v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}")
+                .sourceLocation("https://support.huaweicloud.com/api-modelarts/DetachDevServerVolume.html")
+                .build();
+        ApiMetadata noisyHit = ApiMetadata.builder()
+                .apiId("api-delete-dev-server")
+                .className("DevServerApi")
+                .methodName("delete")
+                .description("delete dev server")
+                .httpMethod("DELETE")
+                .endpoint("/v1/{project_id}/dev-servers/{id}")
+                .sourceLocation("https://support.huaweicloud.com/api-modelarts/DeleteDevServer.html")
+                .build();
+
+        when(llmService.generateTestCode(anyString()))
+                .thenReturn("优化后的需求")
+                .thenReturn("public class DetachVolumeTest {}");
+        when(knowledgeBaseService.search(eq("卸载Lite Server系统盘"), eq(5))).thenReturn(List.of(topHit));
+        when(knowledgeBaseService.search(eq("优化后的需求"), eq(5))).thenReturn(List.of(topHit, noisyHit));
+
+        TestcaseGenerationResult result = service.generate(
+                new TestcaseGenerationRequest("卸载Lite Server系统盘", null));
+
+        assertEquals(1, result.getCitations().size());
+        assertEquals("api-detach-volume", result.getCitations().get(0).getApiId());
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmService, times(2)).generateTestCode(promptCaptor.capture());
+        String generationPrompt = promptCaptor.getAllValues().get(1);
+        assertTrue(generationPrompt.contains("apiId: api-detach-volume"));
+        assertFalse(generationPrompt.contains("apiId: api-delete-dev-server"));
     }
 }
