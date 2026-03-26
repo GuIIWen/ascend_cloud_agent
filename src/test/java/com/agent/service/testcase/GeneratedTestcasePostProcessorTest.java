@@ -74,6 +74,52 @@ class GeneratedTestcasePostProcessorTest {
 
         assertTrue(normalized.contains("private static String requiredConfig("));
         assertTrue(normalized.contains("Assumptions.assumeTrue"));
+        assertTrue(normalized.contains("value = value.replace(\"\\r\", \"\").replace(\"\\n\", \"\").trim();"));
+    }
+
+    @Test
+    void normalizesExistingRequiredConfigMethodToStripCrLfAndTrim() {
+        String generated = """
+                import java.util.Optional;
+                import org.junit.jupiter.api.Test;
+
+                public class AuthHeaderTest {
+                    private static String requiredConfig(String envKey, String propertyKey) {
+                        return Optional.ofNullable(System.getenv(envKey)).orElseGet(() -> System.getProperty(propertyKey));
+                    }
+
+                    @Test
+                    void sendsHeader() {
+                        String token = requiredConfig("HUAWEICLOUD_AUTH_TOKEN", "hwcloud.auth.token");
+                        System.out.println(token);
+                    }
+                }
+                """;
+
+        String normalized = processor.process(generated);
+
+        assertTrue(normalized.contains("value = value.replace(\"\\r\", \"\").replace(\"\\n\", \"\").trim();"));
+        assertFalse(normalized.contains("Optional.ofNullable"));
+    }
+
+    @Test
+    void injectedRequiredConfigSanitizesAuthTokenWithCrLf() {
+        String generated = """
+                import org.junit.jupiter.api.Test;
+
+                public class AuthHeaderTest {
+                    private static final String AUTH_TOKEN = "auth_token_placeholder";
+
+                    @Test
+                    void sendsHeader() {
+                    }
+                }
+                """;
+
+        String normalized = processor.process(generated);
+
+        assertTrue(normalized.contains("requiredConfig(\"HUAWEICLOUD_AUTH_TOKEN\", \"hwcloud.auth.token\")"));
+        assertTrue(normalized.contains("value = value.replace(\"\\r\", \"\").replace(\"\\n\", \"\").trim();"));
     }
 
     @Test

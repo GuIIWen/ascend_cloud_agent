@@ -64,6 +64,7 @@ class GeneratedTestcasePostProcessor {
 
         boolean helperRequired = rewriteRequiredConfigFields(testClass);
         helperRequired = rewriteDirectConfigLookups(testClass) || helperRequired;
+        helperRequired = hasRequiredConfigMethod(testClass) || helperRequired;
         if (helperRequired) {
             ensureAssumptionsImport(compilationUnit);
             ensureRequiredConfigMethod(testClass);
@@ -332,22 +333,30 @@ class GeneratedTestcasePostProcessor {
     }
 
     private void ensureRequiredConfigMethod(ClassOrInterfaceDeclaration testClass) {
-        boolean exists = testClass.getMethodsByName("requiredConfig").stream()
-                .anyMatch(method -> method.getParameters().size() == 2);
-        if (exists) {
-            return;
-        }
+        MethodDeclaration method = testClass.getMethodsByName("requiredConfig").stream()
+                .filter(candidate -> candidate.getParameters().size() == 2)
+                .findFirst()
+                .orElseGet(() -> {
+                    MethodDeclaration created =
+                            testClass.addMethod("requiredConfig", Modifier.Keyword.PRIVATE, Modifier.Keyword.STATIC);
+                    created.setType("String");
+                    created.addParameter("String", "envKey");
+                    created.addParameter("String", "propertyKey");
+                    return created;
+                });
 
-        MethodDeclaration method = testClass.addMethod("requiredConfig", Modifier.Keyword.PRIVATE, Modifier.Keyword.STATIC);
-        method.setType("String");
-        method.addParameter("String", "envKey");
-        method.addParameter("String", "propertyKey");
         method.createBody()
                 .addStatement("String value = System.getenv(envKey);")
                 .addStatement("if (value == null || value.isBlank()) { value = System.getProperty(propertyKey); }")
+                .addStatement("if (value != null) { value = value.replace(\"\\r\", \"\").replace(\"\\n\", \"\").trim(); }")
                 .addStatement("Assumptions.assumeTrue(value != null && !value.isBlank(), "
                         + "\"Missing required config: env \" + envKey + \" or -D\" + propertyKey);")
                 .addStatement("return value;");
+    }
+
+    private boolean hasRequiredConfigMethod(ClassOrInterfaceDeclaration testClass) {
+        return testClass.getMethodsByName("requiredConfig").stream()
+                .anyMatch(method -> method.getParameters().size() == 2);
     }
 
     private record ConfigBinding(String envKey, String propertyKey) {
