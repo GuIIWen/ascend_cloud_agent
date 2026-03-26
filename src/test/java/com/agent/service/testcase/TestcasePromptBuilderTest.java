@@ -37,7 +37,8 @@ class TestcasePromptBuilderTest {
         assertTrue(prompt.contains("expectedHttpStatus: not-provided"));
         assertTrue(prompt.contains("expectedErrorCode: not-provided"));
         assertTrue(prompt.contains("expectedErrorDescription: not-provided"));
-        assertTrue(prompt.contains("不要臆造具体状态码或错误码"));
+        assertTrue(prompt.contains("不要臆造状态码、错误码、状态迁移或响应字段断言"));
+        assertTrue(prompt.contains("不要硬编码 200/400"));
         assertTrue(prompt.contains("不要臆造具体错误描述"));
     }
 
@@ -60,6 +61,9 @@ class TestcasePromptBuilderTest {
         assertTrue(prompt.contains("expectedErrorCode: ModelArts.7000"));
         assertTrue(prompt.contains("expectedErrorDescription: does not support detach volume device"));
         assertTrue(prompt.contains("不得切换到其他资源、服务或端点"));
-        assertTrue(prompt.contains("请写“待确认”，不要臆造"));
+        assertTrue(prompt.contains("输出严格使用以下 4 行格式"));
+        assertTrue(prompt.contains("不要照抄接口背景说明、参数约束"));
+        assertTrue(prompt.contains("输入行只保留关键入参名"));
+        assertTrue(prompt.contains("断言行只能保留已知事实"));
     }
 }

@@ -24,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -239,9 +240,14 @@ class TestcaseGenerationServiceImplTest {
                 new TestcaseGenerationRequest("验证删除工作流", referenceUrl, 400, "MODELARTS_001", "示例错误描述"));
 
         assertNotNull(result);
+        assertTrue(result.getRefinedRequirement().contains("前置条件："));
+        assertTrue(result.getRefinedRequirement().contains("输入："));
+        assertTrue(result.getRefinedRequirement().contains("步骤：调用目标接口。"));
         assertTrue(result.getRefinedRequirement().contains("HTTP状态码=400"));
         assertTrue(result.getRefinedRequirement().contains("错误码=MODELARTS_001"));
         assertTrue(result.getRefinedRequirement().contains("错误描述包含\"示例错误描述\""));
+        assertFalse(result.getRefinedRequirement().contains("参数解释"));
+        assertFalse(result.getRefinedRequirement().contains("约束限制"));
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         verify(llmService, times(2)).generateTestCode(promptCaptor.capture());
         String refinementPrompt = promptCaptor.getAllValues().get(0);
@@ -249,6 +255,7 @@ class TestcaseGenerationServiceImplTest {
         assertTrue(refinementPrompt.contains("expectedHttpStatus: 400"));
         assertTrue(refinementPrompt.contains("expectedErrorCode: MODELARTS_001"));
         assertTrue(refinementPrompt.contains("expectedErrorDescription: 示例错误描述"));
+        assertTrue(refinementPrompt.contains("输出严格使用以下 4 行格式"));
         assertTrue(generationPrompt.contains("expectedHttpStatus: 400"));
         assertTrue(generationPrompt.contains("expectedErrorCode: MODELARTS_001"));
         assertTrue(generationPrompt.contains("expectedErrorDescription: 示例错误描述"));
@@ -326,7 +333,8 @@ class TestcaseGenerationServiceImplTest {
                         }
                         """);
         when(knowledgeBaseService.search(eq("卸载Lite Server系统盘"), eq(5))).thenReturn(List.of(topHit));
-        when(knowledgeBaseService.search(eq("优化后的需求"), eq(5))).thenReturn(List.of(topHit, noisyHit));
+        when(knowledgeBaseService.search(argThat(query -> query != null && query.contains("前置条件：")), eq(5)))
+                .thenReturn(List.of(topHit, noisyHit));
 
         TestcaseGenerationResult result = service.generate(
                 new TestcaseGenerationRequest("卸载Lite Server系统盘", null));
@@ -340,10 +348,13 @@ class TestcaseGenerationServiceImplTest {
         String generationPrompt = promptCaptor.getAllValues().get(1);
         assertTrue(refinementPrompt.contains("候选API锚点"));
         assertTrue(refinementPrompt.contains("/v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}"));
+        assertTrue(refinementPrompt.contains("parameterNames: project_id、id、volume_id"));
+        assertFalse(refinementPrompt.contains("detach volume"));
         assertTrue(generationPrompt.contains("allowedApiId: api-detach-volume"));
         assertFalse(generationPrompt.contains("allowedApiId: api-delete-dev-server"));
         assertTrue(generationPrompt.contains("parameters:"));
         assertTrue(generationPrompt.contains("name=volume_id, type=String, required=true, description=待卸载磁盘ID"));
+        assertTrue(generationPrompt.contains("pathParamBinding: id -> DEV_SERVER_ID"));
         assertTrue(generationPrompt.contains("guardrail: use only this allowed API identity"));
         assertTrue(generationPrompt.contains("guardrail: if explicit expectedHttpStatus/expectedErrorCode/expectedErrorDescription are not provided elsewhere in the prompt and not present below, do not fabricate them"));
     }
@@ -382,11 +393,119 @@ class TestcaseGenerationServiceImplTest {
                 "ModelArts.7000",
                 "does not support detach volume device"));
 
-        assertTrue(result.getRefinedRequirement().contains("目标：验证卸载 Lite Server 系统盘在 BMS 场景下返回 400"));
-        assertTrue(result.getRefinedRequirement().contains("DELETE /v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}"));
-        assertTrue(result.getRefinedRequirement().contains("volume_id=待卸载磁盘ID（必填）"));
-        assertTrue(result.getRefinedRequirement().contains("错误码=ModelArts.7000"));
-        assertTrue(result.getRefinedRequirement().contains("错误描述包含\"does not support detach volume device\""));
+        assertTrue(result.getRefinedRequirement().contains("前置条件：BMS实例。"));
+        assertTrue(result.getRefinedRequirement().contains("输入：project_id、id、volume_id"));
+        assertTrue(result.getRefinedRequirement().contains("步骤：调用 DELETE /v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id} 接口。"));
+        assertTrue(result.getRefinedRequirement().contains("断言：HTTP状态码=400，错误码=ModelArts.7000，错误描述包含\"does not support detach volume device\""));
         assertFalse(result.getRefinedRequirement().contains("InvalidOperation.SystemDiskDetachNotSupported"));
+    }
+
+    @Test
+    void generateAlignsRefinedRequirementWithoutExplicitTruthToPendingAssertion() {
+        ApiMetadata topHit = ApiMetadata.builder()
+                .apiId("api-detach-volume")
+                .description("detach volume")
+                .httpMethod("DELETE")
+                .endpoint("/v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}")
+                .parameters(List.of(
+                        new Parameter("project_id", "String", "项目ID", true),
+                        new Parameter("id", "String", "Lite Server实例ID", true),
+                        new Parameter("volume_id", "String", "待卸载磁盘ID", true)))
+                .sourceLocation("https://support.huaweicloud.com/api-modelarts/DetachDevServerVolume.html")
+                .build();
+
+        when(llmService.generateTestCode(anyString()))
+                .thenReturn("前置条件：已存在挂载了系统盘的 Lite Server 实例\n断言：系统盘成功卸载")
+                .thenReturn("""
+                        import org.junit.jupiter.api.Test;
+
+                        public class DetachVolumeTest {
+                            @Test
+                            void testGenerated() {
+                            }
+                        }
+                        """);
+        when(knowledgeBaseService.search(anyString(), eq(5))).thenReturn(List.of(topHit));
+
+        TestcaseGenerationResult result = service.generate(new TestcaseGenerationRequest(
+                "验证卸载 Lite Server 系统盘",
+                null));
+
+        assertTrue(result.getRefinedRequirement().contains("前置条件：已存在挂载了系统盘的 Lite Server 实例"));
+        assertTrue(result.getRefinedRequirement().contains("输入：project_id、id、volume_id"));
+        assertTrue(result.getRefinedRequirement().contains("步骤：调用 DELETE /v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id} 接口。"));
+        assertTrue(result.getRefinedRequirement().contains("断言：待确认"));
+        assertFalse(result.getRefinedRequirement().contains("系统盘成功卸载"));
+    }
+
+    @Test
+    void generateRetriesWhenNoTruthCodeFabricatesAssertionsOrUsesWrongBinding() {
+        ApiMetadata topHit = ApiMetadata.builder()
+                .apiId("api-detach-volume")
+                .description("detach volume")
+                .httpMethod("DELETE")
+                .endpoint("/v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}")
+                .parameters(List.of(
+                        new Parameter("project_id", "String", "项目ID", true),
+                        new Parameter("id", "String", "Lite Server实例ID", true),
+                        new Parameter("volume_id", "String", "待卸载磁盘ID", true)))
+                .sourceLocation("https://support.huaweicloud.com/api-modelarts/DetachDevServerVolume.html")
+                .build();
+
+        when(llmService.generateTestCode(anyString()))
+                .thenReturn("前置条件：已存在挂载了系统盘的 Lite Server 实例\n断言：待确认")
+                .thenReturn("""
+                        import java.net.http.HttpResponse;
+                        import org.junit.jupiter.api.Test;
+                        import static org.junit.jupiter.api.Assertions.*;
+
+                        public class DetachVolumeTest {
+                            @Test
+                            void detach() {
+                                String serverId = requiredConfig("HUAWEICLOUD_SERVER_ID", "hwcloud.server.id");
+                                HttpResponse<String> response = null;
+                                assertEquals(200, response.statusCode());
+                                assertTrue(response.body().contains("operation_id"));
+                            }
+
+                            private static String requiredConfig(String envKey, String propertyKey) {
+                                return "";
+                            }
+                        }
+                        """)
+                .thenReturn("""
+                        import java.net.http.HttpResponse;
+                        import org.junit.jupiter.api.Test;
+                        import static org.junit.jupiter.api.Assertions.*;
+
+                        public class DetachVolumeTest {
+                            @Test
+                            void detach() {
+                                String devServerId = requiredConfig("HUAWEICLOUD_DEV_SERVER_ID", "hwcloud.dev-server.id");
+                                HttpResponse<String> response = null;
+                                assertNotNull(devServerId);
+                                assertNotNull(response);
+                            }
+
+                            private static String requiredConfig(String envKey, String propertyKey) {
+                                return "";
+                            }
+                        }
+                        """);
+        when(knowledgeBaseService.search(anyString(), eq(5))).thenReturn(List.of(topHit));
+
+        TestcaseGenerationResult result = service.generate(new TestcaseGenerationRequest(
+                "验证卸载 Lite Server 系统盘",
+                null));
+
+        assertTrue(result.getJavaTestCode().contains("requiredConfig(\"HUAWEICLOUD_DEV_SERVER_ID\", \"hwcloud.dev-server.id\")"));
+        assertFalse(result.getJavaTestCode().contains("HUAWEICLOUD_SERVER_ID"));
+        assertFalse(result.getJavaTestCode().contains("assertEquals(200"));
+        assertFalse(result.getJavaTestCode().contains("operation_id"));
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmService, times(3)).generateTestCode(promptCaptor.capture());
+        String retryPrompt = promptCaptor.getAllValues().get(2);
+        assertTrue(retryPrompt.contains("must use DEV_SERVER_ID binding"));
     }
 }

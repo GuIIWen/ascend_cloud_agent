@@ -242,4 +242,23 @@ class GeneratedTestcasePostProcessorTest {
 
         assertThrows(IllegalStateException.class, () -> processor.process(generated));
     }
+
+    @Test
+    void rejectsInvalidJavaSyntaxEvenWhenParserProducesAst() {
+        String generated = """
+                import org.junit.jupiter.api.Test;
+
+                public class InvalidTest {
+                    @Test
+                    void testSyntax() {
+                        ???;
+                    }
+                }
+                """;
+
+        IllegalStateException error = assertThrows(IllegalStateException.class, () -> processor.process(generated));
+
+        assertTrue(error.getMessage().contains("not valid Java syntax")
+                || error.getMessage().contains("placeholder"));
+    }
 }

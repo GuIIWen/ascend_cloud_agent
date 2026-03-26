@@ -31,7 +31,7 @@ class GeneratedTestcasePostProcessor {
 
     private static final Pattern TODO_PATTERN = Pattern.compile("(?i)\\bTODO\\b");
     private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile(
-            "(?i)(auth_token_placeholder|project_id_placeholder|access_key_placeholder|secret_key_placeholder|placeholder)");
+            "(?i)(auth_token_placeholder|project_id_placeholder|access_key_placeholder|secret_key_placeholder|placeholder|\\?{3,})");
     private static final Pattern FABRICATED_RESOURCE_PATTERN = Pattern.compile(
             "(?i)(lite-\\d+|server-\\d+|instance-\\d+|disk-\\d+|volume-\\d+|demo[-_].+|test[-_].+|system)");
     private static final Map<String, ConfigBinding> CONFIG_BINDINGS = Map.of(
@@ -57,8 +57,7 @@ class GeneratedTestcasePostProcessor {
         }
 
         ParseResult<CompilationUnit> parseResult = javaParser.parse(javaCode);
-        CompilationUnit compilationUnit = parseResult.getResult()
-                .orElseThrow(() -> new IllegalStateException("Generated testcase code is not valid Java syntax"));
+        CompilationUnit compilationUnit = requireSuccessfulParse(parseResult, "Generated testcase code is not valid Java syntax");
 
         ClassOrInterfaceDeclaration testClass = requireSinglePublicClass(compilationUnit);
         ensureJUnit5TestClass(compilationUnit, testClass);
@@ -80,10 +79,16 @@ class GeneratedTestcasePostProcessor {
         }
 
         ParseResult<CompilationUnit> reparsed = javaParser.parse(normalized);
-        if (reparsed.getResult().isEmpty()) {
-            throw new IllegalStateException("Generated testcase code failed validation after normalization");
-        }
+        requireSuccessfulParse(reparsed, "Generated testcase code failed validation after normalization");
         return normalized.trim();
+    }
+
+    private CompilationUnit requireSuccessfulParse(ParseResult<CompilationUnit> parseResult, String errorMessage) {
+        if (parseResult == null || !parseResult.isSuccessful() || parseResult.getResult().isEmpty()) {
+            throw new IllegalStateException(errorMessage);
+        }
+        return parseResult.getResult()
+                .orElseThrow(() -> new IllegalStateException(errorMessage));
     }
 
     private ClassOrInterfaceDeclaration requireSinglePublicClass(CompilationUnit compilationUnit) {

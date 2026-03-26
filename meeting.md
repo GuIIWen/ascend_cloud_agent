@@ -3000,3 +3000,85 @@ P10 补充验证：生成出的 Java 测试代码在真实 token 和真实资源
 - 实际运行结果：
   - 首次：`invalid header value`，根因是 token 文本带换行
   - 清洗 token 后复跑：`PASS detachDevServerVolumeShouldReturn400`
+
+## 2026-03-26 16:46:14 +0800
+
+### 主题
+P10 验收 P9 的 agent 效果结论
+
+### 参与角色
+- P9：Harvey，负责从产品链路与验收维度评估 agent 效果
+- P10 主线程：复核 live 请求结果并给出最终验收口径
+
+### 主线程验收结论
+- P9 结论大体成立，但需要修正一条：当前 agent 只能说“单真实负例场景闭环通过”，还不能说“无显式真值场景也已经足够保守”。
+- 我这边最终口径：
+  - 通过：服务链路已通；真实负例场景下 `citations` 正确、生成代码可编译、可用真实 token 和真实资源执行通过。
+  - 部分通过：`refinedRequirement` 质量仍不达标；无显式真值场景下仍存在推断性断言，尚未完全收敛到“只说已知事实”。
+
+### 主线程抽检证据
+- 健康检查：`GET /actuator/health => UP`
+- live 抽检 1：带显式真值请求
+  - 请求：`验证卸载 Lite Server 系统盘在 BMS 场景下返回 400`
+  - 结果：`citations` 仅 1 条，正确命中 `DetachDevServerVolume.html`
+  - 结果：`javaTestCode` 明确断言 `400 / ModelArts.7000 / does not support detach volume device`
+  - 结果：`refinedRequirement` 语义正确，但仍混入大量接口说明、参数解释、约束限制，文本过长
+- live 抽检 2：不带显式真值请求
+  - 请求：`验证卸载 Lite Server 系统盘`
+  - 结果：`citations` 仍正确命中 `DetachDevServerVolume.html`
+  - 结果：`refinedRequirement` 仍出现“服务器后续查询中该 volume_id 不再挂载”这类推断性断言
+  - 结果：`javaTestCode` 仍断言响应体包含 `operation_id / operation_status / operation_type`
+
+### 修正后的正式结论
+- 当前 agent 已经证明：
+  - `能生成`
+  - `能命中正确 API`
+  - `能生成可编译代码`
+  - `能在一个真实负例场景中带真实 token 跑通`
+- 当前 agent 还没有证明：
+  - 无显式真值场景下完全不编造
+  - refined requirement 已达到产品级展示质量
+  - 多场景下稳定可用
+
+### 后续动作
+- 继续收紧 `refinedRequirement` 的 prompt 和后处理，目标是固定成短 4 段式文本，只保留已知事实。
+- 继续收紧无显式真值场景的断言生成策略，禁止补写未验证的后续状态和响应字段。
+
+## 2026-03-26 17:02:07 +0800
+
+### 主题
+P10 再次回归：收紧无显式真值场景，并修复非法 Java 漏出问题
+
+### 变更结论
+- 已完成两类收口：
+  - `refinedRequirement`：无显式真值场景也会被压成固定四段式，断言未知时统一写 `待确认`
+  - `javaTestCode`：新增生成后校验，禁止在无显式真值场景下硬写 `200/400`、`operation_*` 字段断言，以及把 `/dev-servers/{id}` 误绑定成 `SERVER_ID`
+- 同时修复了一个后处理漏洞：
+  - 之前 `GeneratedTestcasePostProcessor` 只看 `JavaParser` 是否返回 AST，没有把 parse problem 当失败
+  - 这会导致 `???;` 这类非法 Java 存在漏出风险
+  - 现已改为 parse 不成功或存在 problem 都直接判失败并触发重试
+
+### 本轮 live 验证结果
+- 健康检查：`GET /actuator/health => UP`
+- 场景 1：`验证卸载 Lite Server 系统盘在 BMS 场景下返回 400`
+  - `citations`：仍然只命中 `DetachDevServerVolume.html`
+  - `refinedRequirement`：已收敛成短四段式
+  - `javaTestCode`：仍使用 `DEV_SERVER_ID` / `VOLUME_ID`，并保留真实断言 `400 / ModelArts.7000 / does not support detach volume device`
+- 场景 2：`验证卸载 Lite Server 系统盘`
+  - `citations`：仍然只命中 `DetachDevServerVolume.html`
+  - `refinedRequirement`：已收敛为
+    - `前置条件：Lite Server 实例已挂载系统盘`
+    - `输入：project_id、id、volume_id`
+    - `步骤：调用 DELETE /v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id} 接口。`
+    - `断言：待确认`
+  - `javaTestCode`：不再出现 `200`、`operation_id / operation_status / operation_type`、`HUAWEICLOUD_SERVER_ID`
+  - `javaTestCode`：当前只保留保守校验 `assertNotNull(response.body())`
+
+### 当前验收口径
+- 通过：
+  - 单真实负例场景闭环仍然成立
+  - 无显式真值场景的幻觉性断言已明显收敛
+  - 非法 Java 漏出漏洞已修复
+- 仍有余量：
+  - 无显式真值场景当前代码虽然更保守，但有效断言仍偏弱，实用性一般
+  - `前置条件` 仍可能偶发生成得过泛，需要后续继续微调
