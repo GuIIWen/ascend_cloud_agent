@@ -2964,3 +2964,39 @@ P10 验收 testcase 生成链路 V3 收口，确认 BMS 卸载系统盘负例可
 - 健康检查：`GET /actuator/health => UP`
 - live 验收 1：`verification passed`，响应文件 `/tmp/testcase-generate-response.3UiHtr.json`
 - live 验收 2：`verification passed`，响应文件 `/tmp/testcase-generate-response.icbjRm.json`
+
+## 2026-03-26 15:58:40 +0800
+
+### 主题
+P10 补充验证：生成出的 Java 测试代码在真实 token 和真实资源参数下可执行通过
+
+### 参与角色
+- P10 主线程：生成代码编译、反射执行器编排、真实参数执行验收
+
+### 统一结论
+- 当前这份 `DetachDevServerVolumeTest` 生成代码，不只是“能编译”，而且在真实 ModelArts 环境下已经执行通过。
+- 验证方式不是 mock，而是带真实运行参数直接执行生成出的测试方法。
+- 首次执行失败并非代码断言错误，而是 `/root/auth_token.txt` 中带有回车换行，`java.net.http` 判定请求头非法。
+- 将 token 先做 `tr -d '\r\n'` 清洗后再次执行，测试结果为：
+  - `PASS detachDevServerVolumeShouldReturn400`
+  - `PASSED 1`
+
+### 关键结论
+- 对“给他 token 能运行吗”这个问题，答案是：
+  - 能运行
+  - 但 token 文本必须去掉 `CR/LF`
+- 对“mock 能运行吗”这个问题，答案是：
+  - 当前生成代码本质上是集成测试风格，不是 HttpClient 级单元 mock 风格
+  - 但因为 `BASE_URL` 可配置，所以可以把 `HUAWEICLOUD_BASE_URL` 指向本地 mock server / WireMock，作为桩服务运行
+
+### 关键证据
+- 生成源码：`/tmp/DetachDevServerVolumeTest.java`
+- Java 21 编译目录：`/tmp/generated-run`
+- 真实运行参数：
+  - `HUAWEICLOUD_BASE_URL=https://modelarts.cn-north-9.myhuaweicloud.com`
+  - `HUAWEICLOUD_PROJECT_ID=2b5cf022801c4a1cac8ee90d431a8f20`
+  - `HUAWEICLOUD_DEV_SERVER_ID=f13a67fc-11c4-48f9-8f0f-b533a5bcea13`
+  - `HUAWEICLOUD_VOLUME_ID=0ce45186-07a7-4139-98b9-2a00233b5ba5`
+- 实际运行结果：
+  - 首次：`invalid header value`，根因是 token 文本带换行
+  - 清洗 token 后复跑：`PASS detachDevServerVolumeShouldReturn400`
