@@ -3117,3 +3117,42 @@ P10 验收 P8 修复：统一清洗 generated testcase 的 requiredConfig 值
 ### 当前口径
 - 这次修复已经把“脏 token 进入请求头”的已知稳定性问题纳入服务端兜底。
 - 该问题现在不再依赖模型是否自觉生成清洗逻辑，而是由后处理统一收口。
+
+## 2026-03-26 17:34:13 +0800
+
+### 主题
+P10 真实场景复验：生成代码在未手工清洗 token 的情况下直接运行通过
+
+### 参与角色
+- P10 主线程：live 生成、源码落盘、Java 编译、真实华为云调用验收
+
+### 验收方法
+- 从当前在线服务重新调用 `POST /api/testcase/generate`
+- 请求：
+  - `requirement=验证卸载 Lite Server 系统盘在 BMS 场景下返回 400`
+  - `expectedHttpStatus=400`
+  - `expectedErrorCode=ModelArts.7000`
+  - `expectedErrorDescription=does not support detach volume device`
+- 将返回的 `javaTestCode` 落盘到 `/tmp/DetachDevServerVolumeRealValidationTest.java`
+- 使用本地 Java 21 + JUnit API 编译
+- 通过 `GeneratedJUnitRunner` 反射执行生成出的测试类
+- 运行参数：
+  - `HUAWEICLOUD_BASE_URL=https://modelarts.cn-north-9.myhuaweicloud.com`
+  - `HUAWEICLOUD_PROJECT_ID=2b5cf022801c4a1cac8ee90d431a8f20`
+  - `HUAWEICLOUD_DEV_SERVER_ID=f13a67fc-11c4-48f9-8f0f-b533a5bcea13`
+  - `HUAWEICLOUD_VOLUME_ID=0ce45186-07a7-4139-98b9-2a00233b5ba5`
+  - `HUAWEICLOUD_AUTH_TOKEN=$(cat /root/auth_token.txt)`，未额外手工清洗
+
+### 结果
+- 编译：通过
+- 真实执行：通过
+- 输出：
+  - `PASS testDetachDevServerVolumeReturns400`
+  - `PASSED 1`
+
+### 关键结论
+- 本轮修复已经验证有效：
+  - 生成代码中的 `requiredConfig(...)` 清洗逻辑，足以吸收 token 文件中的 `CR/LF`
+  - 这次真实通过不再依赖“先手工 `tr -d '\\r\\n'` 再执行”
+- 当前最准确口径：
+  - 新版本服务下，生成出的真实负例测试代码可以直接带原始 token 文件运行通过
