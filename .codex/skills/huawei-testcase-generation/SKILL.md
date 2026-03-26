@@ -39,6 +39,28 @@ Generated tests should read runtime values from env vars or system properties:
 - Base URL:
   - env: `HUAWEICLOUD_BASE_URL`
   - sysprop: `-Dhwcloud.base.url=...`
+- Dev Server ID:
+  - env: `HUAWEICLOUD_DEV_SERVER_ID`
+  - sysprop: `-Dhwcloud.dev-server.id=...`
+- Instance ID:
+  - env: `HUAWEICLOUD_INSTANCE_ID`
+  - sysprop: `-Dhwcloud.instance.id=...`
+- Volume ID:
+  - env: `HUAWEICLOUD_VOLUME_ID`
+  - sysprop: `-Dhwcloud.volume.id=...`
+- Disk ID:
+  - env: `HUAWEICLOUD_DISK_ID`
+  - sysprop: `-Dhwcloud.disk.id=...`
+
+## Generated Code Contract
+
+- The returned `javaTestCode` must contain exactly one `public class`.
+- The code must target JUnit 5 and compile with Java 21.
+- Auth, project, and base URL values must be read via runtime config helpers; do not hardcode them.
+- Required path/resource IDs must not be hardcoded. If the testcase needs `dev-server id`, `instance id`, `volume id`, or `disk id`, they must come from env vars or system properties.
+- The generated testcase may only call the API that is backed by the selected citation/context.
+- If explicit truth is not provided and the context does not contain a concrete truth, do not fabricate exact status code, error code, or error description assertions.
+- Reject code containing `TODO`, placeholder tokens, or fabricated required resource literals such as `lite-123` or `system`.
 
 ## Standard Flow
 
@@ -72,12 +94,16 @@ Generated tests should read runtime values from env vars or system properties:
 
 7. Validate generated code safety and expectations.
 - Reject code containing `TODO` or placeholder tokens.
+- Reject code that hardcodes required resource IDs instead of reading them from runtime config.
+- Reject code that does not declare exactly one `public class`.
 - Confirm explicit expectations appear in assertions when explicitly provided.
+- When explicit expectations are absent, confirm the code does not invent exact error/status truth not present in context.
 
 8. Compile with Java 21.
 - Extract class name from generated code.
 - Save as `/tmp/<ClassName>.java`.
 - Compile with JUnit API jars from local Maven cache.
+- Prefer `scripts/verify_testcase_generation.sh` for the full API response + compile smoke check.
 
 ## Failure Rules
 
@@ -86,6 +112,8 @@ Generated tests should read runtime values from env vars or system properties:
 - If KB hit is weak (missing concrete API metadata), treat it as a miss and require `referenceUrl`.
 - If explicit expectations are not provided and context has no clear status/error semantics:
   - do not fabricate concrete status code, error code, or error description.
+- If the cited API and real truth show a known unsupported path, preserve that negative truth. Example:
+  - BMS Lite Server detach-volume currently validates to `HTTP 400 / ModelArts.7000 / does not support detach volume device`
 
 ## Minimal Curl Example (Example Only, Not a Default API)
 
@@ -145,5 +173,11 @@ APIGUARDIAN="$HOME/.m2/repository/org/apiguardian/apiguardian-api/1.1.2/apiguard
 - Request payload matches latest contract.
 - Response includes `javaTestCode`, `citations`, `degraded`.
 - Generated code contains no placeholder/TODO.
+- Generated code contains exactly one `public class`.
+- Generated code does not hardcode required resource IDs.
 - If expectations were provided, assertions reflect them.
+- If expectations were not provided, code does not fabricate exact error/status truth unsupported by context.
 - Java 21 compilation succeeds.
+
+Preferred end-to-end verifier:
+- `bash scripts/verify_testcase_generation.sh --requirement '...' [--reference-url '...'] [--expected-http-status 400 --expected-error-code ModelArts.7000 --expected-error-description '...']`

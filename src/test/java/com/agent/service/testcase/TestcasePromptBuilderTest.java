@@ -40,4 +40,26 @@ class TestcasePromptBuilderTest {
         assertTrue(prompt.contains("不要臆造具体状态码或错误码"));
         assertTrue(prompt.contains("不要臆造具体错误描述"));
     }
+
+    @Test
+    void buildRefinementPromptIncludesApiAnchorAndExplicitExpectations() {
+        String prompt = builder.buildRefinementPrompt(
+                "卸载 Lite Server 系统盘",
+                """
+                        httpMethod: DELETE
+                        endpoint: /v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}
+                        source: https://support.huaweicloud.com/api-modelarts/DetachDevServerVolume.html
+                        """,
+                400,
+                "ModelArts.7000",
+                "does not support detach volume device");
+
+        assertTrue(prompt.contains("候选API锚点"));
+        assertTrue(prompt.contains("/v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}"));
+        assertTrue(prompt.contains("expectedHttpStatus: 400"));
+        assertTrue(prompt.contains("expectedErrorCode: ModelArts.7000"));
+        assertTrue(prompt.contains("expectedErrorDescription: does not support detach volume device"));
+        assertTrue(prompt.contains("不得切换到其他资源、服务或端点"));
+        assertTrue(prompt.contains("请写“待确认”，不要臆造"));
+    }
 }

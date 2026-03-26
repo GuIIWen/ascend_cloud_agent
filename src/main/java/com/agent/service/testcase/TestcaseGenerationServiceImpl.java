@@ -2,6 +2,7 @@ package com.agent.service.testcase;
 
 import com.agent.crawler.WebDocumentCrawler;
 import com.agent.model.ApiMetadata;
+import com.agent.model.Parameter;
 import com.agent.service.KnowledgeBaseService;
 import com.agent.service.LLMService;
 import dev.langchain4j.data.document.Document;
@@ -24,6 +25,7 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
     private static final int DEFAULT_TOP_K = 5;
     private static final int MAX_REFERENCE_CONTEXT_CHARS = 8_000;
     private static final int MAX_KB_CONTEXT_RESULTS = 1;
+    private static final int MAX_GENERATION_ATTEMPTS = 3;
 
     private final KnowledgeBaseService knowledgeBaseService;
     private final LLMService llmService;
@@ -98,7 +100,17 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
             }
         }
 
-        String refinedRequirement = refineRequirement(requirement);
+        ApiMetadata refinementMetadata = limitKnowledgeBaseHits(rawKnowledgeBaseHits).stream()
+                .findFirst()
+                .orElse(null);
+        String refinementAnchor = buildRefinementAnchor(refinementMetadata);
+        String refinedRequirement = refineRequirement(
+                requirement,
+                refinementMetadata,
+                refinementAnchor,
+                expectedHttpStatus,
+                expectedErrorCode,
+                expectedErrorDescription);
         List<ApiMetadata> searchResults = knowledgeBaseService.search(refinedRequirement, topK);
         List<ApiMetadata> effectiveKbResults = filterKnowledgeBaseHits(searchResults);
         if (effectiveKbResults.isEmpty() && !rawKnowledgeBaseHits.isEmpty()) {
@@ -130,21 +142,7 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
                 expectedHttpStatus,
                 expectedErrorCode,
                 expectedErrorDescription);
-        String javaTestCode = cleanupCodeFence(llmService.generateTestCode(generationPrompt));
-        if (!hasText(javaTestCode)) {
-            throw new IllegalStateException("LLM returned empty testcase code");
-        }
-        try {
-            javaTestCode = generatedTestcasePostProcessor.process(javaTestCode);
-        } catch (IllegalStateException e) {
-            logger.error(
-                    "Generated testcase post-processing failed: requirement='{}' refinedRequirement='{}' preview='{}'",
-                    requirement,
-                    refinedRequirement,
-                    abbreviate(javaTestCode),
-                    e);
-            throw e;
-        }
+        String javaTestCode = generateValidatedTestcaseCode(generationPrompt, requirement, refinedRequirement);
 
         return new TestcaseGenerationResult(
                 javaTestCode,
@@ -153,10 +151,74 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
                 refinedRequirement);
     }
 
-    private String refineRequirement(String requirement) {
-        String prompt = promptBuilder.buildRefinementPrompt(requirement);
+    private String generateValidatedTestcaseCode(
+            String generationPrompt,
+            String requirement,
+            String refinedRequirement) {
+        String prompt = generationPrompt;
+        String lastGenerated = null;
+        IllegalStateException lastValidationError = null;
+
+        for (int attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
+            String javaTestCode = cleanupCodeFence(llmService.generateTestCode(prompt));
+            if (!hasText(javaTestCode)) {
+                lastValidationError = new IllegalStateException("LLM returned empty testcase code");
+            } else {
+                try {
+                    return generatedTestcasePostProcessor.process(javaTestCode);
+                } catch (IllegalStateException e) {
+                    lastGenerated = javaTestCode;
+                    lastValidationError = e;
+                    logger.warn(
+                            "Generated testcase validation failed on attempt {}/{}: requirement='{}' refinedRequirement='{}' reason='{}'",
+                            attempt,
+                            MAX_GENERATION_ATTEMPTS,
+                            requirement,
+                            refinedRequirement,
+                            e.getMessage());
+                }
+            }
+
+            if (attempt < MAX_GENERATION_ATTEMPTS) {
+                prompt = promptBuilder.buildRetryGenerationPrompt(
+                        generationPrompt,
+                        lastValidationError.getMessage(),
+                        attempt + 1);
+            }
+        }
+
+        logger.error(
+                "Generated testcase post-processing failed after {} attempts: requirement='{}' refinedRequirement='{}' preview='{}'",
+                MAX_GENERATION_ATTEMPTS,
+                requirement,
+                refinedRequirement,
+                abbreviate(lastGenerated),
+                lastValidationError);
+        throw lastValidationError;
+    }
+
+    private String refineRequirement(
+            String requirement,
+            ApiMetadata refinementMetadata,
+            String refinementAnchor,
+            Integer expectedHttpStatus,
+            String expectedErrorCode,
+            String expectedErrorDescription) {
+        String prompt = promptBuilder.buildRefinementPrompt(
+                requirement,
+                refinementAnchor,
+                expectedHttpStatus,
+                expectedErrorCode,
+                expectedErrorDescription);
         String refined = normalize(llmService.generateTestCode(prompt));
-        return hasText(refined) ? refined : requirement;
+        String effective = hasText(refined) ? refined : requirement;
+        return alignRefinedRequirement(
+                requirement,
+                effective,
+                refinementMetadata,
+                expectedHttpStatus,
+                expectedErrorCode,
+                expectedErrorDescription);
     }
 
     private List<ApiMetadata> filterKnowledgeBaseHits(List<ApiMetadata> results) {
@@ -182,13 +244,17 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
     private String buildKnowledgeBaseContext(List<ApiMetadata> metadataList) {
         StringBuilder builder = new StringBuilder();
         for (ApiMetadata metadata : metadataList) {
-            builder.append("apiId: ").append(nullToEmpty(metadata.getApiId())).append('\n');
+            builder.append("allowedApiId: ").append(nullToEmpty(metadata.getApiId())).append('\n');
+            builder.append("allowedKnowledgeSource: knowledge-base-top-hit").append('\n');
+            builder.append("guardrail: use only this allowed API identity, method, endpoint, source, and parameters; do not invent a second API").append('\n');
+            builder.append("guardrail: if explicit expectedHttpStatus/expectedErrorCode/expectedErrorDescription are not provided elsewhere in the prompt and not present below, do not fabricate them").append('\n');
             appendLine(builder, "description", metadata.getDescription());
             appendLine(builder, "class", metadata.getClassName());
             appendLine(builder, "method", metadata.getMethodName());
             appendLine(builder, "signature", metadata.getSignature());
             appendLine(builder, "httpMethod", metadata.getHttpMethod());
             appendLine(builder, "endpoint", metadata.getEndpoint());
+            appendParameters(builder, metadata.getParameters());
             appendLine(builder, "requestBody", metadata.getRequestBody());
             appendLine(builder, "responseBody", metadata.getResponseBody());
             appendLine(builder, "source", metadata.getSourceLocation());
@@ -212,6 +278,20 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
         return results.stream()
                 .limit(MAX_KB_CONTEXT_RESULTS)
                 .toList();
+    }
+
+    private String buildRefinementAnchor(ApiMetadata metadata) {
+        if (metadata == null) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        appendLine(builder, "apiId", metadata.getApiId());
+        appendLine(builder, "description", metadata.getDescription());
+        appendLine(builder, "httpMethod", metadata.getHttpMethod());
+        appendLine(builder, "endpoint", metadata.getEndpoint());
+        appendParameters(builder, metadata.getParameters());
+        appendLine(builder, "source", metadata.getSourceLocation());
+        return builder.toString().trim();
     }
 
     private ReferenceContext fetchReferenceContext(String referenceUrl) {
@@ -256,6 +336,132 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
             return;
         }
         builder.append(name).append(": ").append(value.trim()).append('\n');
+    }
+
+    private void appendParameters(StringBuilder builder, List<Parameter> parameters) {
+        if (parameters == null || parameters.isEmpty()) {
+            return;
+        }
+        builder.append("parameters:").append('\n');
+        for (Parameter parameter : parameters) {
+            if (parameter == null || !hasText(parameter.getName())) {
+                continue;
+            }
+            builder.append("- name=").append(parameter.getName().trim());
+            if (hasText(parameter.getType())) {
+                builder.append(", type=").append(parameter.getType().trim());
+            }
+            builder.append(", required=").append(parameter.isRequired());
+            if (hasText(parameter.getDescription())) {
+                builder.append(", description=").append(parameter.getDescription().trim());
+            }
+            builder.append('\n');
+        }
+    }
+
+    private String alignRefinedRequirement(
+            String requirement,
+            String refinedRequirement,
+            ApiMetadata refinementMetadata,
+            Integer expectedHttpStatus,
+            String expectedErrorCode,
+            String expectedErrorDescription) {
+        if (!hasExplicitExpectation(expectedHttpStatus, expectedErrorCode, expectedErrorDescription)) {
+            return refinedRequirement;
+        }
+        List<String> segments = new ArrayList<>();
+        String goal = hasText(requirement) ? requirement : refinedRequirement;
+        if (hasText(goal)) {
+            segments.add("目标：" + goal);
+        }
+        String apiSummary = buildApiSummary(refinementMetadata);
+        if (hasText(apiSummary)) {
+            segments.add("接口：" + apiSummary);
+        }
+        String inputSummary = buildParameterSummary(refinementMetadata == null ? null : refinementMetadata.getParameters());
+        if (hasText(inputSummary)) {
+            segments.add("输入：" + inputSummary);
+        }
+        segments.add("步骤：使用有效鉴权调用目标接口并记录响应。");
+        segments.add("断言：" + buildExpectationSummary(
+                expectedHttpStatus,
+                expectedErrorCode,
+                expectedErrorDescription));
+        return String.join(" ", segments);
+    }
+
+    private boolean hasExplicitExpectation(
+            Integer expectedHttpStatus,
+            String expectedErrorCode,
+            String expectedErrorDescription) {
+        return expectedHttpStatus != null
+                || hasText(expectedErrorCode)
+                || hasText(expectedErrorDescription);
+    }
+
+    private String buildApiSummary(ApiMetadata refinementMetadata) {
+        if (refinementMetadata == null) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        if (hasText(refinementMetadata.getDescription())) {
+            builder.append(refinementMetadata.getDescription().trim());
+        }
+        if (hasText(refinementMetadata.getHttpMethod()) || hasText(refinementMetadata.getEndpoint())) {
+            if (builder.length() > 0) {
+                builder.append("，");
+            }
+            if (hasText(refinementMetadata.getHttpMethod())) {
+                builder.append(refinementMetadata.getHttpMethod().trim()).append(" ");
+            }
+            if (hasText(refinementMetadata.getEndpoint())) {
+                builder.append(refinementMetadata.getEndpoint().trim());
+            }
+        }
+        return builder.toString().trim();
+    }
+
+    private String buildParameterSummary(List<Parameter> parameters) {
+        if (parameters == null || parameters.isEmpty()) {
+            return "";
+        }
+        List<String> parts = new ArrayList<>();
+        for (Parameter parameter : parameters) {
+            if (parameter == null || !hasText(parameter.getName())) {
+                continue;
+            }
+            StringBuilder builder = new StringBuilder(parameter.getName().trim());
+            if (hasText(parameter.getDescription())) {
+                builder.append("=").append(parameter.getDescription().trim());
+            }
+            if (parameter.isRequired()) {
+                builder.append("（必填）");
+            } else {
+                builder.append("（选填）");
+            }
+            parts.add(builder.toString());
+        }
+        return String.join("；", parts);
+    }
+
+    private String buildExpectationSummary(
+            Integer expectedHttpStatus,
+            String expectedErrorCode,
+            String expectedErrorDescription) {
+        List<String> parts = new ArrayList<>();
+        if (expectedHttpStatus != null) {
+            parts.add("HTTP状态码=" + expectedHttpStatus);
+        }
+        if (hasText(expectedErrorCode)) {
+            parts.add("错误码=" + expectedErrorCode);
+        }
+        if (hasText(expectedErrorDescription)) {
+            parts.add("错误描述包含\"" + expectedErrorDescription + "\"");
+        }
+        if (parts.isEmpty()) {
+            return "待确认";
+        }
+        return String.join("，", parts);
     }
 
     private String cleanupCodeFence(String generated) {

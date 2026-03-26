@@ -2,6 +2,7 @@ package com.agent.service.testcase;
 
 import com.agent.crawler.WebDocumentCrawler;
 import com.agent.model.ApiMetadata;
+import com.agent.model.Parameter;
 import com.agent.service.KnowledgeBaseService;
 import com.agent.service.LLMService;
 import dev.langchain4j.data.document.Document;
@@ -31,6 +32,16 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class TestcaseGenerationServiceImplTest {
+
+    private static final String MINIMAL_JUNIT5_TEST = """
+            import org.junit.jupiter.api.Test;
+
+            public class WorkflowListTest {
+                @Test
+                void testGenerated() {
+                }
+            }
+            """;
 
     @Mock
     private KnowledgeBaseService knowledgeBaseService;
@@ -64,7 +75,7 @@ class TestcaseGenerationServiceImplTest {
 
         when(llmService.generateTestCode(anyString()))
                 .thenReturn("优化后的需求")
-                .thenReturn("```java\npublic class WorkflowListTest {}\n```");
+                .thenReturn("```java\n" + MINIMAL_JUNIT5_TEST + "\n```");
         when(knowledgeBaseService.search(eq("验证工作流查询"), eq(5))).thenReturn(List.of(metadata));
         when(knowledgeBaseService.search(eq("优化后的需求"), eq(5))).thenReturn(List.of(metadata));
 
@@ -92,8 +103,16 @@ class TestcaseGenerationServiceImplTest {
 
         when(llmService.generateTestCode(anyString()))
                 .thenReturn("优化后的需求")
-                .thenReturn("public class WorkflowCreateTest {}");
-        when(knowledgeBaseService.search(eq("优化后的需求"), anyInt())).thenReturn(List.of());
+                .thenReturn("""
+                        import org.junit.jupiter.api.Test;
+
+                        public class WorkflowCreateTest {
+                            @Test
+                            void testGenerated() {
+                            }
+                        }
+                        """);
+        when(knowledgeBaseService.search(anyString(), anyInt())).thenReturn(List.of());
         when(webDocumentCrawler.crawl(referenceUrl)).thenReturn(document);
 
         TestcaseGenerationResult result = service.generate(
@@ -136,7 +155,15 @@ class TestcaseGenerationServiceImplTest {
         when(knowledgeBaseService.search(eq("优化后的需求"), eq(5))).thenReturn(List.of());
         when(llmService.generateTestCode(anyString()))
                 .thenReturn("优化后的需求")
-                .thenReturn("public class DeleteWorkflowTest {}");
+                .thenReturn("""
+                        import org.junit.jupiter.api.Test;
+
+                        public class DeleteWorkflowTest {
+                            @Test
+                            void testGenerated() {
+                            }
+                        }
+                        """);
 
         TestcaseGenerationResult result = service.generate(
                 new TestcaseGenerationRequest("验证删除工作流", null));
@@ -174,7 +201,7 @@ class TestcaseGenerationServiceImplTest {
                             }
                         }
                         """);
-        when(knowledgeBaseService.search(eq("优化后的需求"), anyInt())).thenReturn(List.of());
+        when(knowledgeBaseService.search(anyString(), anyInt())).thenReturn(List.of());
         when(webDocumentCrawler.crawl(referenceUrl)).thenReturn(document);
 
         TestcaseGenerationResult result = service.generate(
@@ -196,21 +223,70 @@ class TestcaseGenerationServiceImplTest {
 
         when(llmService.generateTestCode(anyString()))
                 .thenReturn("优化后的需求")
-                .thenReturn("public class DeleteWorkflowTest {}");
-        when(knowledgeBaseService.search(eq("优化后的需求"), anyInt())).thenReturn(List.of());
+                .thenReturn("""
+                        import org.junit.jupiter.api.Test;
+
+                        public class DeleteWorkflowTest {
+                            @Test
+                            void testGenerated() {
+                            }
+                        }
+                        """);
+        when(knowledgeBaseService.search(anyString(), anyInt())).thenReturn(List.of());
         when(webDocumentCrawler.crawl(referenceUrl)).thenReturn(document);
 
         TestcaseGenerationResult result = service.generate(
                 new TestcaseGenerationRequest("验证删除工作流", referenceUrl, 400, "MODELARTS_001", "示例错误描述"));
 
         assertNotNull(result);
-        assertEquals("优化后的需求", result.getRefinedRequirement());
+        assertTrue(result.getRefinedRequirement().contains("HTTP状态码=400"));
+        assertTrue(result.getRefinedRequirement().contains("错误码=MODELARTS_001"));
+        assertTrue(result.getRefinedRequirement().contains("错误描述包含\"示例错误描述\""));
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         verify(llmService, times(2)).generateTestCode(promptCaptor.capture());
+        String refinementPrompt = promptCaptor.getAllValues().get(0);
         String generationPrompt = promptCaptor.getAllValues().get(1);
+        assertTrue(refinementPrompt.contains("expectedHttpStatus: 400"));
+        assertTrue(refinementPrompt.contains("expectedErrorCode: MODELARTS_001"));
+        assertTrue(refinementPrompt.contains("expectedErrorDescription: 示例错误描述"));
         assertTrue(generationPrompt.contains("expectedHttpStatus: 400"));
         assertTrue(generationPrompt.contains("expectedErrorCode: MODELARTS_001"));
         assertTrue(generationPrompt.contains("expectedErrorDescription: 示例错误描述"));
+    }
+
+    @Test
+    void generateRetriesWhenFirstGeneratedCodeFailsValidation() throws IOException {
+        String referenceUrl = "https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html";
+        Metadata metadata = new Metadata();
+        metadata.put("source", referenceUrl);
+        metadata.put("title", "ModelArts API");
+        Document document = Document.from("DELETE /v2/{project_id}/workflows/{workflow_id}", metadata);
+
+        when(llmService.generateTestCode(anyString()))
+                .thenReturn("优化后的需求")
+                .thenReturn("""
+                        class InvalidTest {
+                            void testGenerated() {
+                            }
+                        }
+                        """)
+                .thenReturn("""
+                        import org.junit.jupiter.api.Test;
+
+                        public class DeleteWorkflowTest {
+                            @Test
+                            void testGenerated() {
+                            }
+                        }
+                        """);
+        when(knowledgeBaseService.search(anyString(), anyInt())).thenReturn(List.of());
+        when(webDocumentCrawler.crawl(referenceUrl)).thenReturn(document);
+
+        TestcaseGenerationResult result = service.generate(
+                new TestcaseGenerationRequest("验证删除工作流", referenceUrl));
+
+        assertTrue(result.getJavaTestCode().contains("public class DeleteWorkflowTest"));
+        verify(llmService, times(3)).generateTestCode(anyString());
     }
 
     @Test
@@ -222,6 +298,10 @@ class TestcaseGenerationServiceImplTest {
                 .description("detach volume")
                 .httpMethod("DELETE")
                 .endpoint("/v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}")
+                .parameters(List.of(
+                        new Parameter("project_id", "String", "项目ID", true),
+                        new Parameter("id", "String", "Lite Server实例ID", true),
+                        new Parameter("volume_id", "String", "待卸载磁盘ID", true)))
                 .sourceLocation("https://support.huaweicloud.com/api-modelarts/DetachDevServerVolume.html")
                 .build();
         ApiMetadata noisyHit = ApiMetadata.builder()
@@ -236,7 +316,15 @@ class TestcaseGenerationServiceImplTest {
 
         when(llmService.generateTestCode(anyString()))
                 .thenReturn("优化后的需求")
-                .thenReturn("public class DetachVolumeTest {}");
+                .thenReturn("""
+                        import org.junit.jupiter.api.Test;
+
+                        public class DetachVolumeTest {
+                            @Test
+                            void testGenerated() {
+                            }
+                        }
+                        """);
         when(knowledgeBaseService.search(eq("卸载Lite Server系统盘"), eq(5))).thenReturn(List.of(topHit));
         when(knowledgeBaseService.search(eq("优化后的需求"), eq(5))).thenReturn(List.of(topHit, noisyHit));
 
@@ -248,8 +336,57 @@ class TestcaseGenerationServiceImplTest {
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         verify(llmService, times(2)).generateTestCode(promptCaptor.capture());
+        String refinementPrompt = promptCaptor.getAllValues().get(0);
         String generationPrompt = promptCaptor.getAllValues().get(1);
-        assertTrue(generationPrompt.contains("apiId: api-detach-volume"));
-        assertFalse(generationPrompt.contains("apiId: api-delete-dev-server"));
+        assertTrue(refinementPrompt.contains("候选API锚点"));
+        assertTrue(refinementPrompt.contains("/v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}"));
+        assertTrue(generationPrompt.contains("allowedApiId: api-detach-volume"));
+        assertFalse(generationPrompt.contains("allowedApiId: api-delete-dev-server"));
+        assertTrue(generationPrompt.contains("parameters:"));
+        assertTrue(generationPrompt.contains("name=volume_id, type=String, required=true, description=待卸载磁盘ID"));
+        assertTrue(generationPrompt.contains("guardrail: use only this allowed API identity"));
+        assertTrue(generationPrompt.contains("guardrail: if explicit expectedHttpStatus/expectedErrorCode/expectedErrorDescription are not provided elsewhere in the prompt and not present below, do not fabricate them"));
+    }
+
+    @Test
+    void generateAlignsRefinedRequirementToTopHitAndExplicitTruth() {
+        ApiMetadata topHit = ApiMetadata.builder()
+                .apiId("api-detach-volume")
+                .description("detach volume")
+                .httpMethod("DELETE")
+                .endpoint("/v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}")
+                .parameters(List.of(
+                        new Parameter("project_id", "String", "项目ID", true),
+                        new Parameter("id", "String", "Lite Server实例ID", true),
+                        new Parameter("volume_id", "String", "待卸载磁盘ID", true)))
+                .sourceLocation("https://support.huaweicloud.com/api-modelarts/DetachDevServerVolume.html")
+                .build();
+
+        when(llmService.generateTestCode(anyString()))
+                .thenReturn("前置条件：BMS实例。断言：错误码=InvalidOperation.SystemDiskDetachNotSupported")
+                .thenReturn("""
+                        import org.junit.jupiter.api.Test;
+
+                        public class DetachVolumeTest {
+                            @Test
+                            void testGenerated() {
+                            }
+                        }
+                        """);
+        when(knowledgeBaseService.search(anyString(), eq(5))).thenReturn(List.of(topHit));
+
+        TestcaseGenerationResult result = service.generate(new TestcaseGenerationRequest(
+                "验证卸载 Lite Server 系统盘在 BMS 场景下返回 400",
+                null,
+                400,
+                "ModelArts.7000",
+                "does not support detach volume device"));
+
+        assertTrue(result.getRefinedRequirement().contains("目标：验证卸载 Lite Server 系统盘在 BMS 场景下返回 400"));
+        assertTrue(result.getRefinedRequirement().contains("DELETE /v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}"));
+        assertTrue(result.getRefinedRequirement().contains("volume_id=待卸载磁盘ID（必填）"));
+        assertTrue(result.getRefinedRequirement().contains("错误码=ModelArts.7000"));
+        assertTrue(result.getRefinedRequirement().contains("错误描述包含\"does not support detach volume device\""));
+        assertFalse(result.getRefinedRequirement().contains("InvalidOperation.SystemDiskDetachNotSupported"));
     }
 }

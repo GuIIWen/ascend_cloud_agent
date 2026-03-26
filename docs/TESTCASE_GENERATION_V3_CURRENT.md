@@ -106,6 +106,26 @@ All LLM calls must use the **custom LLM** configured via `knowledge-base.llm.*`.
      - Do not output placeholders like `TODO` or "skeleton only" when context is insufficient.
      - If neither KB context nor referenceUrl context exists, must error (Step 2 rule).
 
+## 4.1 Generated Code Contract
+
+The generated `javaTestCode` is not free-form text. It must follow these hard rules:
+
+- Must contain exactly one `public class`.
+- Must be JUnit 5 style code and compile with Java 21.
+- Runtime config must be read via `requiredConfig(envKey, propertyKey)`; do not hardcode auth or project settings.
+- At minimum, the following runtime values must be sourced from env vars or system properties when used by the testcase:
+  - `HUAWEICLOUD_AUTH_TOKEN` / `hwcloud.auth.token`
+  - `HUAWEICLOUD_PROJECT_ID` / `hwcloud.project.id`
+  - `HUAWEICLOUD_BASE_URL` / `hwcloud.base.url`
+- Resource identifiers must not be hardcoded. When the testcase uses API path parameters such as dev-server ID, instance ID, volume ID, or disk ID, they must be read from runtime config, for example:
+  - `HUAWEICLOUD_DEV_SERVER_ID` / `hwcloud.dev-server.id`
+  - `HUAWEICLOUD_INSTANCE_ID` / `hwcloud.instance.id`
+  - `HUAWEICLOUD_VOLUME_ID` / `hwcloud.volume.id`
+  - `HUAWEICLOUD_DISK_ID` / `hwcloud.disk.id`
+- Generated code may only call the API that is supported by the selected citation/context. It must not silently introduce an extra API that is not present in the citation set.
+- If explicit truth is not supplied through `expectedHttpStatus`, `expectedErrorCode`, or `expectedErrorDescription`, and the retrieved context also does not provide a concrete truth, the generated code must not fabricate exact status codes, error codes, error descriptions, state transitions, or field values.
+- Generated code must not contain `TODO`, placeholder tokens, or fake sample IDs such as `lite-123`, `system`, `replace_with_xxx`, or similar fabricated literals for required resource IDs.
+
 ## 5. Error Semantics
 
 Transport/framework errors:
@@ -132,6 +152,7 @@ Suggested error payload shape:
 Degrade rules (allowed, but must remain safe):
 - Reference URL fetch failure: may fall back to KB-only generation *only if* KB hit exists; otherwise it must still error (no code).
 - KB retrieval failure should fail closed: do not generate code without a valid context source.
+- Code generation should also fail closed on semantics: if the system cannot derive a truthful status/error assertion from explicit expectations or context, it must prefer a weaker assertion or fail the request rather than invent a false truth.
 
 ## 6. Configuration Dependencies (Custom LLM)
 
@@ -148,6 +169,18 @@ Retrieval dependencies (existing KB stack):
 
 Batch 3 must not introduce a new config tree unless explicitly approved by P10.
 
+Current runtime truth for the Lite Server BMS detach-volume negative case:
+- Real API:
+  - `DELETE /v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}`
+- Real request target:
+  - `project_id=2b5cf022801c4a1cac8ee90d431a8f20`
+  - `id=f13a67fc-11c4-48f9-8f0f-b533a5bcea13`
+  - `volume_id=0ce45186-07a7-4139-98b9-2a00233b5ba5`
+- Real response:
+  - HTTP `400`
+  - `error_code=ModelArts.7000`
+  - `error_msg=Server f13a67fc-11c4-48f9-8f0f-b533a5bcea13 type is BMS, does not support detach volume device.`
+
 ## 7. Acceptance Criteria (Batch 3)
 
 - `POST /api/testcase/generate` returns Java testcase code when:
@@ -163,6 +196,12 @@ Batch 3 must not introduce a new config tree unless explicitly approved by P10.
 - No new storage/middleware introduced.
 - No workflow/planner/executor/orchestrator path introduced.
 - Response includes `citations` for provenance.
+- Generated code contains exactly one `public class`.
+- Generated code compiles with Java 21 and JUnit 5 dependencies.
+- Generated code does not contain `TODO` or placeholder tokens.
+- Generated code does not hardcode required resource IDs such as dev-server ID, instance ID, volume ID, or disk ID.
+- Generated code uses only the cited API context and does not silently add extra API calls.
+- When explicit truth is absent, generated code does not fabricate exact status/error assertions.
 
 ## 8. Relationship With Historical Docs
 
