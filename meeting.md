@@ -29,6 +29,73 @@
   - 若是一次真实调用或真实执行，必须写清请求、运行参数边界或证据文件路径
   - 若结论会影响设计基线，必须同步更新对应设计文档
 
+## 2026-03-27 11:27:40 +0800
+
+### 主题
+Batch 3 最小前端页面验收：页面链路打通，但真实生成结果仍未满足业务语义
+
+### 参与角色
+- P10 主线程：最终验收与会议纪要记录
+- P8 页面 owner：实现静态前端页面
+
+### 变更背景
+- 之前服务根路径 `/` 无页面，用户只能通过接口方式调用测试用例生成功能。
+- 本次目标是补一版最小可用页面，直接承载输入、提交、结果展示与代码复制。
+
+### 本次决策
+- 前端不新引入独立框架，先采用 Spring Boot 静态资源页面落地：
+  - `src/main/resources/static/index.html`
+  - `src/main/resources/static/app.css`
+  - `src/main/resources/static/app.js`
+- 页面只负责请求 `POST /api/testcase/generate` 并展示：
+  - `refinedRequirement`
+  - `citations`
+  - `javaTestCode`
+
+### 验收方法
+- 主线程复核页面文件结构、字段映射和交互逻辑。
+- 运行态验收：
+  - `GET /` 检查欢迎页是否可访问
+  - `GET /app.css`
+  - `GET /app.js`
+  - `GET /actuator/health`
+  - `POST /api/testcase/generate` 发送真实请求，确认页面依赖的接口返回结构
+
+### 验收结果
+- 页面链路通过：
+  - `GET /` 返回 `HTTP 200`
+  - `GET /app.css` 返回 `HTTP 200`
+  - `GET /app.js` 返回 `HTTP 200`
+  - `GET /actuator/health` 返回 `HTTP 200`
+  - 服务日志出现 `Adding welcome page: class path resource [static/index.html]`
+- 页面能力已具备：
+  - 可填写 `requirement/referenceUrl/expectedHttpStatus/expectedErrorCode/expectedErrorDescription`
+  - 可展示 `refinedRequirement/citations/javaTestCode`
+  - 可复制生成出的 Java 代码
+- 但真实生成结果不通过业务验收：
+  - 输入：`验证卸载 Lite Server 系统盘在 BMS 场景下返回 400，并校验错误码和错误描述`
+  - 返回的 `refinedRequirement` 仍是“待确认”式弱约束文本
+  - 返回的 `javaTestCode` 仍按成功场景断言 `operation_id/operation_status/operation_type`
+  - 没有落实用户要求的 `HTTP 400`、错误码、错误描述校验
+
+### 风险/未完成项
+- 当前页面只是把后端真实输出展示出来，并未修复后端生成语义问题。
+- 因此“页面可用”不等于“业务结果可用”；后续必须继续修正 requirement refinement 与 testcase generation prompt / post-check 逻辑。
+
+### 后续动作
+- 后续按“页面展示通过、生成质量未通过”两个口径分别验收，避免 UI 可见性掩盖业务错误。
+- 下一步继续治理：
+  - refined requirement 必须从用户输入中保留明确约束，不得回退成“待确认”
+  - 生成代码必须与真实接口语义对齐，负向用例必须断言 `400` 与错误信息，而不是成功字段
+
+### 关键证据
+- `src/main/resources/static/index.html`
+- `src/main/resources/static/app.css`
+- `src/main/resources/static/app.js`
+- `GET http://127.0.0.1:8080/`
+- `GET http://127.0.0.1:8080/actuator/health`
+- `POST http://127.0.0.1:8080/api/testcase/generate`
+
 ## 2026-03-27 11:11:36 +0800
 
 ### 主题
