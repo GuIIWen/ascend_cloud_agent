@@ -103,6 +103,31 @@ class GeneratedTestcasePostProcessorTest {
     }
 
     @Test
+    void normalizesExistingRequiredConfigMethodParameterNames() {
+        String generated = """
+                import org.junit.jupiter.api.Test;
+
+                public class AuthHeaderTest {
+                    private static String requiredConfig(String envKey, String sysKey) {
+                        return System.getenv(envKey);
+                    }
+
+                    @Test
+                    void sendsHeader() {
+                        String token = requiredConfig("HUAWEICLOUD_AUTH_TOKEN", "hwcloud.auth.token");
+                        System.out.println(token);
+                    }
+                }
+                """;
+
+        String normalized = processor.process(generated);
+
+        assertTrue(normalized.contains("private static String requiredConfig(String envKey, String propertyKey)"));
+        assertTrue(normalized.contains("value = System.getProperty(propertyKey);"));
+        assertFalse(normalized.contains("String sysKey"));
+    }
+
+    @Test
     void injectedRequiredConfigSanitizesAuthTokenWithCrLf() {
         String generated = """
                 import org.junit.jupiter.api.Test;

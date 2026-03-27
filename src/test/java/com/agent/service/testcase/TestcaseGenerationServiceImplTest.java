@@ -225,11 +225,18 @@ class TestcaseGenerationServiceImplTest {
         when(llmService.generateTestCode(anyString()))
                 .thenReturn("优化后的需求")
                 .thenReturn("""
+                        import java.net.http.HttpResponse;
                         import org.junit.jupiter.api.Test;
+                        import static org.junit.jupiter.api.Assertions.*;
 
                         public class DeleteWorkflowTest {
                             @Test
                             void testGenerated() {
+                                HttpResponse<String> response = null;
+                                String body = response.body();
+                                assertEquals(400, response.statusCode());
+                                assertTrue(body.contains("MODELARTS_001"));
+                                assertTrue(body.contains("示例错误描述"));
                             }
                         }
                         """);
@@ -376,11 +383,18 @@ class TestcaseGenerationServiceImplTest {
         when(llmService.generateTestCode(anyString()))
                 .thenReturn("前置条件：BMS实例。断言：错误码=InvalidOperation.SystemDiskDetachNotSupported")
                 .thenReturn("""
+                        import java.net.http.HttpResponse;
                         import org.junit.jupiter.api.Test;
+                        import static org.junit.jupiter.api.Assertions.*;
 
                         public class DetachVolumeTest {
                             @Test
                             void testGenerated() {
+                                HttpResponse<String> response = null;
+                                String body = response.body();
+                                assertEquals(400, response.statusCode());
+                                assertTrue(body.contains("ModelArts.7000"));
+                                assertTrue(body.contains("does not support detach volume device"));
                             }
                         }
                         """);
@@ -398,6 +412,58 @@ class TestcaseGenerationServiceImplTest {
         assertTrue(result.getRefinedRequirement().contains("步骤：调用 DELETE /v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id} 接口。"));
         assertTrue(result.getRefinedRequirement().contains("断言：HTTP状态码=400，错误码=ModelArts.7000，错误描述包含\"does not support detach volume device\""));
         assertFalse(result.getRefinedRequirement().contains("InvalidOperation.SystemDiskDetachNotSupported"));
+    }
+
+    @Test
+    void generateExtractsExpectationFromRequirementWhenStructuredFieldsAreAbsent() {
+        ApiMetadata topHit = ApiMetadata.builder()
+                .apiId("api-detach-volume")
+                .description("detach volume")
+                .httpMethod("DELETE")
+                .endpoint("/v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}")
+                .parameters(List.of(
+                        new Parameter("project_id", "String", "项目ID", true),
+                        new Parameter("id", "String", "Lite Server实例ID", true),
+                        new Parameter("volume_id", "String", "待卸载磁盘ID", true)))
+                .sourceLocation("https://support.huaweicloud.com/api-modelarts/DetachDevServerVolume.html")
+                .build();
+
+        when(llmService.generateTestCode(anyString()))
+                .thenReturn("前置条件：BMS实例。断言：待确认")
+                .thenReturn("""
+                        import java.net.http.HttpResponse;
+                        import org.junit.jupiter.api.Test;
+                        import static org.junit.jupiter.api.Assertions.*;
+
+                        public class DetachVolumeTest {
+                            @Test
+                            void detach() {
+                                HttpResponse<String> response = null;
+                                String body = response.body();
+                                assertEquals(400, response.statusCode());
+                                assertTrue(body.contains("ModelArts.7000"));
+                                assertTrue(body.contains("does not support detach volume device"));
+                            }
+                        }
+                        """);
+        when(knowledgeBaseService.search(anyString(), eq(5))).thenReturn(List.of(topHit));
+
+        TestcaseGenerationResult result = service.generate(new TestcaseGenerationRequest(
+                "验证卸载 Lite Server 系统盘返回400，错误码=ModelArts.7000，错误描述包含\"does not support detach volume device\"",
+                null));
+
+        assertTrue(result.getRefinedRequirement().contains("断言：HTTP状态码=400，错误码=ModelArts.7000，错误描述包含\"does not support detach volume device\""));
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmService, times(2)).generateTestCode(promptCaptor.capture());
+        String refinementPrompt = promptCaptor.getAllValues().get(0);
+        String generationPrompt = promptCaptor.getAllValues().get(1);
+        assertTrue(refinementPrompt.contains("expectedHttpStatus: 400"));
+        assertTrue(refinementPrompt.contains("expectedErrorCode: ModelArts.7000"));
+        assertTrue(refinementPrompt.contains("expectedErrorDescription: does not support detach volume device"));
+        assertTrue(generationPrompt.contains("expectedHttpStatus: 400"));
+        assertTrue(generationPrompt.contains("expectedErrorCode: ModelArts.7000"));
+        assertTrue(generationPrompt.contains("expectedErrorDescription: does not support detach volume device"));
     }
 
     @Test
@@ -436,6 +502,145 @@ class TestcaseGenerationServiceImplTest {
         assertTrue(result.getRefinedRequirement().contains("步骤：调用 DELETE /v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id} 接口。"));
         assertTrue(result.getRefinedRequirement().contains("断言：待确认"));
         assertFalse(result.getRefinedRequirement().contains("系统盘成功卸载"));
+    }
+
+    @Test
+    void generateRetriesWhenRequirementDerivedNegativeTruthStillAssertsSuccessOperationFields() {
+        ApiMetadata topHit = ApiMetadata.builder()
+                .apiId("api-detach-volume")
+                .description("detach volume")
+                .httpMethod("DELETE")
+                .endpoint("/v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}")
+                .parameters(List.of(
+                        new Parameter("project_id", "String", "项目ID", true),
+                        new Parameter("id", "String", "Lite Server实例ID", true),
+                        new Parameter("volume_id", "String", "待卸载磁盘ID", true)))
+                .responseBody("""
+                        {
+                          "operation_id": "UUID",
+                          "operation_status": "running",
+                          "operation_type": "node_detach_volume"
+                        }
+                        """)
+                .sourceLocation("https://support.huaweicloud.com/api-modelarts/DetachDevServerVolume.html")
+                .build();
+
+        when(llmService.generateTestCode(anyString()))
+                .thenReturn("前置条件：已存在挂载了系统盘的 Lite Server 实例\n断言：待确认")
+                .thenReturn("""
+                        import java.net.http.HttpResponse;
+                        import org.junit.jupiter.api.Test;
+                        import static org.junit.jupiter.api.Assertions.*;
+
+                        public class DetachVolumeTest {
+                            @Test
+                            void detach() {
+                                HttpResponse<String> response = null;
+                                assertEquals(400, response.statusCode());
+                                assertTrue(response.body().contains("operation_id"));
+                            }
+                        }
+                        """)
+                .thenReturn("""
+                        import java.net.http.HttpResponse;
+                        import org.junit.jupiter.api.Test;
+                        import static org.junit.jupiter.api.Assertions.*;
+
+                        public class DetachVolumeTest {
+                            @Test
+                            void detach() {
+                                HttpResponse<String> response = null;
+                                assertEquals(400, response.statusCode());
+                                assertNotNull(response.body());
+                            }
+                        }
+                        """);
+        when(knowledgeBaseService.search(anyString(), eq(5))).thenReturn(List.of(topHit));
+
+        TestcaseGenerationResult result = service.generate(new TestcaseGenerationRequest(
+                "验证卸载 Lite Server 系统盘在 BMS 场景下返回 400",
+                null));
+
+        assertFalse(result.getJavaTestCode().contains("operation_id"));
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmService, times(3)).generateTestCode(promptCaptor.capture());
+        String retryPrompt = promptCaptor.getAllValues().get(2);
+        assertTrue(retryPrompt.contains("must not assert success response fields"));
+    }
+
+    @Test
+    void generateRetriesWhenNoTruthCodeAssertsResponseBodyFieldsEvenIfKnowledgeBaseHasResponseBody() {
+        ApiMetadata topHit = ApiMetadata.builder()
+                .apiId("api-detach-volume")
+                .description("detach volume")
+                .httpMethod("DELETE")
+                .endpoint("/v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}")
+                .parameters(List.of(
+                        new Parameter("project_id", "String", "项目ID", true),
+                        new Parameter("id", "String", "Lite Server实例ID", true),
+                        new Parameter("volume_id", "String", "待卸载磁盘ID", true)))
+                .responseBody("""
+                        {
+                          "operation_id": "UUID",
+                          "operation_status": "running"
+                        }
+                        """)
+                .sourceLocation("https://support.huaweicloud.com/api-modelarts/DetachDevServerVolume.html")
+                .build();
+
+        when(llmService.generateTestCode(anyString()))
+                .thenReturn("前置条件：已存在挂载了系统盘的 Lite Server 实例\n断言：待确认")
+                .thenReturn("""
+                        import java.net.http.HttpResponse;
+                        import org.junit.jupiter.api.Test;
+                        import static org.junit.jupiter.api.Assertions.*;
+
+                        public class DetachVolumeTest {
+                            @Test
+                            void detach() {
+                                String devServerId = requiredConfig("HUAWEICLOUD_DEV_SERVER_ID", "hwcloud.dev-server.id");
+                                HttpResponse<String> response = null;
+                                assertNotNull(devServerId);
+                                assertTrue(response.body().contains("operation_id"));
+                            }
+
+                            private static String requiredConfig(String envKey, String propertyKey) {
+                                return "";
+                            }
+                        }
+                        """)
+                .thenReturn("""
+                        import java.net.http.HttpResponse;
+                        import org.junit.jupiter.api.Test;
+                        import static org.junit.jupiter.api.Assertions.*;
+
+                        public class DetachVolumeTest {
+                            @Test
+                            void detach() {
+                                String devServerId = requiredConfig("HUAWEICLOUD_DEV_SERVER_ID", "hwcloud.dev-server.id");
+                                HttpResponse<String> response = null;
+                                assertNotNull(devServerId);
+                                assertNotNull(response.body());
+                            }
+
+                            private static String requiredConfig(String envKey, String propertyKey) {
+                                return "";
+                            }
+                        }
+                        """);
+        when(knowledgeBaseService.search(anyString(), eq(5))).thenReturn(List.of(topHit));
+
+        TestcaseGenerationResult result = service.generate(new TestcaseGenerationRequest(
+                "验证卸载 Lite Server 系统盘",
+                null));
+
+        assertFalse(result.getJavaTestCode().contains("operation_id"));
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmService, times(3)).generateTestCode(promptCaptor.capture());
+        String retryPrompt = promptCaptor.getAllValues().get(2);
+        assertTrue(retryPrompt.contains("must not assert response body fields"));
     }
 
     @Test

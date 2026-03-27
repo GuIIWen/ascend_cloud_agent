@@ -27,11 +27,27 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
     private static final int MAX_REFERENCE_CONTEXT_CHARS = 8_000;
     private static final int MAX_KB_CONTEXT_RESULTS = 1;
     private static final int MAX_GENERATION_ATTEMPTS = 3;
+    private static final Pattern REQUIREMENT_HTTP_STATUS = Pattern.compile(
+            "(?:HTTP\\s*(?:状态码|status(?:\\s*code)?)|状态码|返回)\\s*(?:为|是|=|:)?\\s*(\\d{3})(?!\\d)",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern REQUIREMENT_ERROR_CODE = Pattern.compile(
+            "(?:错误码|error[_\\s-]?code)\\s*(?:为|是|=|:)?\\s*([A-Za-z][A-Za-z0-9_.-]+)",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern KNOWN_ERROR_CODE = Pattern.compile(
+            "\\b(?:ModelArts|MODELARTS|APIGW)\\.[A-Za-z0-9]+(?:\\.[A-Za-z0-9]+)?\\b");
+    private static final Pattern QUOTED_ERROR_DESCRIPTION = Pattern.compile(
+            "(?:错误描述(?:包含)?|error[_\\s-]?(?:msg|message|description))\\s*(?:为|是|=|:|包含)?\\s*[\"“]([^\"”]+)[\"”]",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern RAW_ERROR_MESSAGE = Pattern.compile(
+            "(?:error_msg|error_message)\\s*(?:=|:)\\s*([^,，。；;]+)",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern HARDCODED_STATUS_ASSERTION = Pattern.compile(
             "assert(?:Equals|NotEquals)\\s*\\(\\s*\\d{3}\\s*,\\s*[A-Za-z0-9_]+\\.statusCode\\s*\\(");
     private static final Pattern BODY_CONTAINS_ASSERTION = Pattern.compile(
             "assertTrue\\s*\\([^;]*\\.contains\\s*\\(",
             Pattern.DOTALL);
+    private static final Pattern SUCCESS_OPERATION_FIELD = Pattern.compile(
+            "operation_(?:id|status|type)");
 
     private final KnowledgeBaseService knowledgeBaseService;
     private final LLMService llmService;
@@ -94,9 +110,14 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
             throw new IllegalArgumentException("requirement must not be blank");
         }
         String referenceUrl = normalize(request.getReferenceUrl());
-        Integer expectedHttpStatus = request.getExpectedHttpStatus();
-        String expectedErrorCode = normalize(request.getExpectedErrorCode());
-        String expectedErrorDescription = normalize(request.getExpectedErrorDescription());
+        ResolvedExpectation resolvedExpectation = resolveExpectation(
+                requirement,
+                request.getExpectedHttpStatus(),
+                normalize(request.getExpectedErrorCode()),
+                normalize(request.getExpectedErrorDescription()));
+        Integer expectedHttpStatus = resolvedExpectation.expectedHttpStatus();
+        String expectedErrorCode = resolvedExpectation.expectedErrorCode();
+        String expectedErrorDescription = resolvedExpectation.expectedErrorDescription();
         List<ApiMetadata> rawKnowledgeBaseHits = List.of();
 
         if (!hasText(referenceUrl)) {
@@ -536,6 +557,16 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
             String expectedErrorCode,
             String expectedErrorDescription) {
         validatePathBinding(javaTestCode, primaryMetadata);
+        validateExplicitExpectationCoverage(
+                javaTestCode,
+                expectedHttpStatus,
+                expectedErrorCode,
+                expectedErrorDescription);
+        if (isNegativeExpectation(expectedHttpStatus, expectedErrorCode, expectedErrorDescription)
+                && SUCCESS_OPERATION_FIELD.matcher(javaTestCode).find()) {
+            throw new IllegalStateException(
+                    "Generated negative testcase code must not assert success response fields such as operation_id/operation_status/operation_type");
+        }
         if (hasExplicitExpectation(expectedHttpStatus, expectedErrorCode, expectedErrorDescription)) {
             return;
         }
@@ -543,11 +574,51 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
             throw new IllegalStateException(
                     "Generated testcase code must not hard-code HTTP status assertions when explicit expectation is absent");
         }
-        if ((primaryMetadata == null || !hasText(primaryMetadata.getResponseBody()))
-                && BODY_CONTAINS_ASSERTION.matcher(javaTestCode).find()) {
+        if (BODY_CONTAINS_ASSERTION.matcher(javaTestCode).find()) {
             throw new IllegalStateException(
                     "Generated testcase code must not assert response body fields when response truth is absent");
         }
+    }
+
+    private void validateExplicitExpectationCoverage(
+            String javaTestCode,
+            Integer expectedHttpStatus,
+            String expectedErrorCode,
+            String expectedErrorDescription) {
+        if (expectedHttpStatus != null && !hasStatusAssertion(javaTestCode, expectedHttpStatus)) {
+            throw new IllegalStateException(
+                    "Generated testcase code must assert HTTP status " + expectedHttpStatus);
+        }
+        if (hasText(expectedErrorCode) && !javaTestCode.contains(expectedErrorCode)) {
+            throw new IllegalStateException(
+                    "Generated testcase code must assert expected error code " + expectedErrorCode);
+        }
+        if (hasText(expectedErrorDescription) && !javaTestCode.contains(expectedErrorDescription)) {
+            throw new IllegalStateException(
+                    "Generated testcase code must assert expected error description " + expectedErrorDescription);
+        }
+    }
+
+    private boolean isNegativeExpectation(
+            Integer expectedHttpStatus,
+            String expectedErrorCode,
+            String expectedErrorDescription) {
+        return (expectedHttpStatus != null && expectedHttpStatus >= 400)
+                || hasText(expectedErrorCode)
+                || hasText(expectedErrorDescription);
+    }
+
+    private boolean hasStatusAssertion(String javaTestCode, int expectedHttpStatus) {
+        String status = Integer.toString(expectedHttpStatus);
+        Pattern assertEqualsStatusCode = Pattern.compile(
+                "assert(?:Equals|NotEquals)\\s*\\(\\s*" + status + "\\s*,\\s*[^;\\n]*statusCode\\s*\\(");
+        Pattern assertEqualsStatusCodeReversed = Pattern.compile(
+                "assert(?:Equals|NotEquals)\\s*\\(\\s*[^;\\n]*statusCode\\s*\\(\\s*\\)\\s*,\\s*" + status + "\\s*\\)");
+        Pattern assertTrueStatusCode = Pattern.compile(
+                "assertTrue\\s*\\([^;\\n]*statusCode\\s*\\(\\s*\\)\\s*==\\s*" + status + "[^;\\n]*\\)");
+        return assertEqualsStatusCode.matcher(javaTestCode).find()
+                || assertEqualsStatusCodeReversed.matcher(javaTestCode).find()
+                || assertTrueStatusCode.matcher(javaTestCode).find();
     }
 
     private void validatePathBinding(String javaTestCode, ApiMetadata primaryMetadata) {
@@ -632,6 +703,74 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
         return value != null && !value.trim().isEmpty();
     }
 
+    private ResolvedExpectation resolveExpectation(
+            String requirement,
+            Integer expectedHttpStatus,
+            String expectedErrorCode,
+            String expectedErrorDescription) {
+        Integer resolvedHttpStatus = expectedHttpStatus != null
+                ? expectedHttpStatus
+                : extractHttpStatus(requirement);
+        String resolvedErrorCode = hasText(expectedErrorCode)
+                ? expectedErrorCode
+                : extractErrorCode(requirement);
+        String resolvedErrorDescription = hasText(expectedErrorDescription)
+                ? expectedErrorDescription
+                : extractErrorDescription(requirement);
+        return new ResolvedExpectation(
+                resolvedHttpStatus,
+                resolvedErrorCode,
+                resolvedErrorDescription);
+    }
+
+    private Integer extractHttpStatus(String requirement) {
+        if (!hasText(requirement)) {
+            return null;
+        }
+        var matcher = REQUIREMENT_HTTP_STATUS.matcher(requirement);
+        if (!matcher.find()) {
+            return null;
+        }
+        int status = Integer.parseInt(matcher.group(1));
+        return status >= 100 && status <= 599 ? status : null;
+    }
+
+    private String extractErrorCode(String requirement) {
+        if (!hasText(requirement)) {
+            return null;
+        }
+        var labeledMatcher = REQUIREMENT_ERROR_CODE.matcher(requirement);
+        if (labeledMatcher.find()) {
+            return normalize(labeledMatcher.group(1));
+        }
+        var knownMatcher = KNOWN_ERROR_CODE.matcher(requirement);
+        if (knownMatcher.find()) {
+            return normalize(knownMatcher.group());
+        }
+        return null;
+    }
+
+    private String extractErrorDescription(String requirement) {
+        if (!hasText(requirement)) {
+            return null;
+        }
+        var quotedMatcher = QUOTED_ERROR_DESCRIPTION.matcher(requirement);
+        if (quotedMatcher.find()) {
+            return normalize(quotedMatcher.group(1));
+        }
+        var rawMatcher = RAW_ERROR_MESSAGE.matcher(requirement);
+        if (rawMatcher.find()) {
+            return normalize(rawMatcher.group(1));
+        }
+        return null;
+    }
+
     private record ReferenceContext(String content, String source) {
+    }
+
+    private record ResolvedExpectation(
+            Integer expectedHttpStatus,
+            String expectedErrorCode,
+            String expectedErrorDescription) {
     }
 }

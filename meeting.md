@@ -29,6 +29,79 @@
   - 若是一次真实调用或真实执行，必须写清请求、运行参数边界或证据文件路径
   - 若结论会影响设计基线，必须同步更新对应设计文档
 
+## 2026-03-27 12:14:33 +0800
+
+### 主题
+P10 收口 testcase 生成链路：补 requirement 显式期望提取、收紧负例生成校验，并修复 requiredConfig 编译漏洞
+
+### 参与角色
+- P10 主线程：方案收口、代码实现、live 验收、会议记录
+
+### 变更背景
+- 2026-03-27 11 点段的页面验收暴露出一条未收口分支：
+  - 用户只在 `requirement` 文本里写“返回 400，并校验错误码和错误描述”时，后端不会提取显式期望
+  - `refinedRequirement` 会退化成 `断言：待确认`
+  - 生成代码会被知识库中的成功响应示例带偏，滑回 `operation_id / operation_status / operation_type`
+- 同轮编译级验收还抓到一个真实编译问题：
+  - LLM 偶发生成 `requiredConfig(String envKey, String sysKey)`，但方法体仍引用 `propertyKey`
+  - 服务能返回代码，但 Java 21 实编译失败
+
+### 本次决策
+- 在 `TestcaseGenerationServiceImpl` 中新增“显式期望归一”：
+  - 优先级固定为 `请求结构化字段 > requirement 文本提取 > 无`
+  - 当前先支持从 `requirement` 中提取：
+    - `HTTP 状态码`
+    - `错误码`
+    - 带标签/引号的错误描述
+- 在生成后校验中增加强约束：
+  - 有显式期望时，生成代码必须包含对应断言内容
+  - 负例场景禁止再断言 `operation_id / operation_status / operation_type`
+  - 无显式真值场景一律禁止 `body.contains(...)` 式响应体字段断言，即使知识库里存在成功响应样例
+- 在 `GeneratedTestcasePostProcessor` 中归一 `requiredConfig` 方法参数名，杜绝 `sysKey/propertyKey` 不一致导致的编译失败
+
+### 验收方法
+- 单测：
+  - `mvn -q -Dtest=TestcaseGenerationServiceImplTest,TestcasePromptBuilderTest,GeneratedTestcasePostProcessorTest test`
+- 打包：
+  - `mvn -q -DskipTests package`
+- 运行态：
+  - 重启 `8080` 服务并校验 `GET /actuator/health => 200`
+- 编译级 live 验收：
+  - `bash scripts/verify_testcase_generation.sh --requirement "验证卸载 Lite Server 系统盘在 BMS 场景下返回 400，并校验错误码和错误描述"`
+  - `bash scripts/verify_testcase_generation.sh --requirement "验证卸载 Lite Server 系统盘在 BMS 场景下返回 400" --expected-http-status 400 --expected-error-code ModelArts.7000 --expected-error-description "does not support detach volume device"`
+
+### 验收结果
+- 单测通过，打包通过，服务已重启，新 PID：`442277`
+- natural request 验收通过：
+  - `refinedRequirement` 收口为四段式，并保留 `HTTP状态码=400`
+  - 生成代码包含 `assertEquals(400, response.statusCode())`
+  - 生成代码不再包含 `operation_id`
+  - 因用户未给出真实错误码/错误描述，代码中不再臆造这两项
+- 显式真值 request 验收通过：
+  - `refinedRequirement` 保留 `400 / ModelArts.7000 / does not support detach volume device`
+  - 生成代码包含 `400`、`ModelArts.7000`、`does not support detach volume device`
+  - 生成代码不包含 `operation_id`
+- 两条请求都通过了 `scripts/verify_testcase_generation.sh` 的 Java 21 实编译验收
+
+### 风险/未完成项
+- 当前 requirement 文本提取仍是规则型，不是语义理解型：
+  - 能稳定提取 `返回400`、`错误码=...`、带标签的错误描述
+  - 但还不能从更隐式、更口语化的描述中稳定抽取业务真值
+- 这轮没有新增“真实执行级”验收，只完成到“服务返回 + Java 21 编译”口径
+
+### 后续动作
+- 如果后面要进一步提高“只写自然语言也能完整出真值断言”的能力，需要单独做：
+  - requirement truth extraction 的更强规则或专门子链路
+  - 与真实业务真值库的对齐，而不是继续从文档成功响应里猜
+
+### 关键证据
+- `src/main/java/com/agent/service/testcase/TestcaseGenerationServiceImpl.java`
+- `src/main/java/com/agent/service/testcase/GeneratedTestcasePostProcessor.java`
+- `src/test/java/com/agent/service/testcase/TestcaseGenerationServiceImplTest.java`
+- `src/test/java/com/agent/service/testcase/GeneratedTestcasePostProcessorTest.java`
+- `/tmp/testcase-generate-response.WBu4h2.json`
+- `/tmp/testcase-generate-response.JLPBo6.json`
+
 ## 2026-03-27 11:27:40 +0800
 
 ### 主题

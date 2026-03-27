@@ -344,6 +344,8 @@ class GeneratedTestcasePostProcessor {
                     created.addParameter("String", "propertyKey");
                     return created;
                 });
+        method.getParameter(0).setName("envKey");
+        method.getParameter(1).setName("propertyKey");
 
         method.createBody()
                 .addStatement("String value = System.getenv(envKey);")
