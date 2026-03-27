@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ascend Agent · Testcase Generation</title>
+    <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="page-shell">
+    <header class="hero">
+        <div class="hero-copy">
+            <p class="eyebrow">Ascend Agent</p>
+            <h1>Generate Java testcases from requirement text</h1>
+            <p class="hero-text">
+                输入测试用例描述，可选补充参考 API 链接与期望错误信息，直接查看优化后的描述、引用来源和生成出的 Java 测试代码。
+            </p>
+        </div>
+        <div class="hero-panel">
+            <div class="hero-metric">
+                <span class="hero-metric-label">Endpoint</span>
+                <strong>POST /api/testcase/generate</strong>
+            </div>
+            <div class="hero-metric">
+                <span class="hero-metric-label">Output</span>
+                <strong>refined requirement + citations + Java code</strong>
+            </div>
+        </div>
+    </header>
+
+    <main class="workspace">
+        <section class="card card-form">
+            <div class="section-heading">
+                <div>
+                    <p class="section-kicker">Input</p>
+                    <h2>Generation request</h2>
+                </div>
+                <p class="section-note">`requirement` 必填，其余字段按需补充。</p>
+            </div>
+
+            <form id="generation-form" class="form-grid" novalidate>
+                <label class="field field-full" for="requirement">
+                    <span>Requirement <em>*</em></span>
+                    <textarea
+                            id="requirement"
+                            name="requirement"
+                            rows="6"
+                            required
+                            placeholder="例如：验证卸载 Lite Server 系统盘在 BMS 场景下返回 400，并校验错误码和错误描述"></textarea>
+                </label>
+
+                <label class="field field-full" for="referenceUrl">
+                    <span>Reference URL</span>
+                    <input
+                            id="referenceUrl"
+                            name="referenceUrl"
+                            type="url"
+                            inputmode="url"
+                            placeholder="https://support.huaweicloud.com/api-modelarts/DetachDevServerVolume.html">
+                </label>
+
+                <label class="field" for="expectedHttpStatus">
+                    <span>Expected HTTP Status</span>
+                    <input
+                            id="expectedHttpStatus"
+                            name="expectedHttpStatus"
+                            type="number"
+                            inputmode="numeric"
+                            min="100"
+                            max="599"
+                            placeholder="400">
+                </label>
+
+                <label class="field" for="expectedErrorCode">
+                    <span>Expected Error Code</span>
+                    <input
+                            id="expectedErrorCode"
+                            name="expectedErrorCode"
+                            type="text"
+                            placeholder="ModelArts.7000">
+                </label>
+
+                <label class="field field-full" for="expectedErrorDescription">
+                    <span>Expected Error Description</span>
+                    <input
+                            id="expectedErrorDescription"
+                            name="expectedErrorDescription"
+                            type="text"
+                            placeholder="does not support detach volume device">
+                </label>
+
+                <div class="actions">
+                    <button id="submit-button" class="primary-button" type="submit">
+                        <span class="button-text">Generate testcase</span>
+                        <span class="button-spinner" aria-hidden="true"></span>
+                    </button>
+                    <p class="actions-hint">页面不会执行测试，只负责生成与展示结果。</p>
+                </div>
+            </form>
+
+            <div id="status-banner" class="status-banner is-idle" role="status" aria-live="polite">
+                <span class="status-dot"></span>
+                <span id="status-text">Ready for a new generation request.</span>
+            </div>
+        </section>
+
+        <section class="card card-results">
+            <div class="section-heading">
+                <div>
+                    <p class="section-kicker">Output</p>
+                    <h2>Generation result</h2>
+                </div>
+            </div>
+
+            <div id="empty-state" class="empty-state">
+                <p>提交请求后，这里会展示优化后的测试用例描述、知识库引用来源和 Java 测试代码。</p>
+            </div>
+
+            <div id="result-panel" class="result-panel" hidden>
+                <article class="result-block">
+                    <div class="result-title-row">
+                        <h3>Refined Requirement</h3>
+                    </div>
+                    <pre id="refinedRequirement" class="result-text"></pre>
+                </article>
+
+                <article class="result-block">
+                    <div class="result-title-row">
+                        <h3>Citations</h3>
+                    </div>
+                    <div id="citations" class="citation-list"></div>
+                </article>
+
+                <article class="result-block">
+                    <div class="result-title-row">
+                        <h3>Java Test Code</h3>
+                        <button id="copy-button" class="ghost-button" type="button">Copy code</button>
+                    </div>
+                    <pre id="javaTestCode" class="code-block"></pre>
+                </article>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
