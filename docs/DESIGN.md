@@ -5,7 +5,25 @@
 > 当前实现主要集中在“知识库 v1/v2 基础设施原型与 Spring 接入骨架”，端到端主链路（Agent/用例优化/代码生成/写入测试文件）尚未在 `src/main/java` 中落地。  
 > 运行与配置基线以 [CONFIG_GUIDE.md](/root/ascend_agent/docs/CONFIG_GUIDE.md) 为准。
 
-## 0. 当前基线/后续治理（截至 2026-03-20）
+## 0.1 阅读顺序与权威边界
+
+- 如果你要看“当前真正能跑的 Batch 3 主链路”，先读：
+  - `docs/TESTCASE_GENERATION_V3_CURRENT.md`
+  - `meeting.md`
+- 如果你要看“当前实际架构图”，先读：
+  - `docs/ARCHITECTURE.md` 中的 `当前 Batch 3 实际架构图`
+- 本文用途仅限：
+  - 目标态技术设计
+  - 长期演进方向
+  - 模块职责与理想接口
+
+不应把本文直接当成当前实现说明的内容包括：
+- 用户确认候选 API
+- 服务端自动写入测试文件
+- 端到端 Agent 主入口闭环
+- 服务侧自动执行生成出来的测试
+
+## 0. 当前基线/后续治理（截至 2026-03-27）
 
 当前基线：
 - 本文件中的“用户确认候选 API”属于交互式流程描述；而 [ARCHITECTURE.md](/root/ascend_agent/docs/ARCHITECTURE.md) 的目标叙事是“零交互”。两者不应同时被解读为“已实现”，需在实现前先统一产品形态与链路取舍。

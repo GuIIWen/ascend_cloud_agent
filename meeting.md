@@ -6,6 +6,88 @@
 - 建议把最新记录放在文件最上方，便于事后快速查看。
 - 记录至少包含：时间、主题、范围、统一结论、问题分级、行动项、关键证据。
 
+## Record Template
+- 固定栏目：
+  - 主题
+  - 时间
+  - 参与角色
+  - 变更背景
+  - 本次决策
+  - 验收方法
+  - 验收结果
+  - 风险/未完成项
+  - 后续动作
+  - 关键证据
+- 标签建议：
+  - `Decision`：拍板结论
+  - `Validation`：验收或真实验证
+  - `Regression`：回归结果
+  - `Risk`：残余风险
+  - `Follow-up`：后续动作
+- 记录规则：
+  - 优先写“统一结论”和“验收结果”，不要先写过程流水账
+  - 若是一次真实调用或真实执行，必须写清请求、运行参数边界或证据文件路径
+  - 若结论会影响设计基线，必须同步更新对应设计文档
+
+## 2026-03-27 11:11:36 +0800
+
+### 主题
+Batch 3 文档边界收口：执行基线、目标设计、会议决议三线分治
+
+### 参与角色
+- P10 主线程：文档收口与最终验收
+- P9：方案对齐与文档结构建议
+
+### 变更背景
+- 当前 `docs/TESTCASE_GENERATION_V3_CURRENT.md`、`docs/ARCHITECTURE.md`、`docs/DESIGN.md`、`meeting.md` 同时承载不同层级的信息，但边界不够清楚。
+- 结果是：执行真相、目标态规划、历史验收证据容易被混读，影响后续实现和验收口径。
+
+### 本次决策
+- `docs/TESTCASE_GENERATION_V3_CURRENT.md`：
+  - 作为 Batch 3 当前唯一执行设计主文档
+  - 补充生成后验证链路、真实执行验证链路、脚本入口、已实现/未实现范围
+- `docs/ARCHITECTURE.md`：
+  - 增加“当前 Batch 3 实际架构图”
+  - 保留目标态全景图，但明确降级为目标设计
+- `docs/DESIGN.md`：
+  - 保留为目标态技术设计
+  - 明确阅读顺序与权威边界，避免被误读为当前实现
+- `meeting.md`：
+  - 继续作为决议与验收日志
+  - 增加固定模板和标签规则，减少流水账式记录
+
+### 验收方法
+- 主线程复核以下文件的新增章节与边界说明是否一致：
+  - `docs/TESTCASE_GENERATION_V3_CURRENT.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/DESIGN.md`
+  - `meeting.md`
+
+### 验收结果
+- 文档边界已收口：
+  - `V3` 文档承载当前执行真相
+  - `ARCHITECTURE` 同时区分当前实际图与目标态图
+  - `DESIGN` 明确退回目标态文档
+  - `meeting.md` 增加模板化记录规则
+- 当前最准确的文档权威口径：
+  - 执行真相：`docs/TESTCASE_GENERATION_V3_CURRENT.md` + `meeting.md`
+  - 运行入口：`README.md` + `scripts/*`
+  - 目标设计：`docs/DESIGN.md` + `docs/ARCHITECTURE.md` 目标态部分
+
+### 风险/未完成项
+- `meeting.md` 历史存量记录仍然是老格式，没有整体回填标签。
+- 未来若补前端页面，还需要把 UI 使用流补回 `V3` 文档和当前实际架构图。
+
+### 后续动作
+- 后续任何影响 Batch 3 主链路的实现或验收，先更新 `V3` 文档，再补 `meeting.md` 证据。
+- `DESIGN.md` 与 `ARCHITECTURE.md` 只在目标态有变化时更新，不再承担“当前已实现能力说明”。
+
+### 关键证据
+- `docs/TESTCASE_GENERATION_V3_CURRENT.md`
+- `docs/ARCHITECTURE.md`
+- `docs/DESIGN.md`
+- `meeting.md`
+
 ## 2026-03-25 20:53:09 +0800
 
 ### 主题

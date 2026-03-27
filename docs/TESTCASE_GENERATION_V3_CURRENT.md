@@ -8,6 +8,7 @@ It is intentionally constrained and must not drift into "收编" (planner/workfl
 Current rule authority:
 - This document is the execution baseline for Batch 3.
 - Product hard decisions are recorded in `meeting.md` (latest Batch 3 entries).
+- `docs/DESIGN.md` and `docs/ARCHITECTURE.md` remain target-state documents; they must not override this file for current implementation truth.
 
 ## 1. Background And Goal
 
@@ -25,6 +26,7 @@ Key rules:
 
 - No planner/workflow/orchestrator and no multi-step execution framework.
 - No auto-running tests.
+- No service-side automatic execution against Huawei Cloud during `POST /api/testcase/generate`.
 - No writing files to the repo (no `src/test/java/**` writes from the service).
 - No PR creation.
 - No new storage or middleware as a prerequisite.
@@ -106,7 +108,37 @@ All LLM calls must use the **custom LLM** configured via `knowledge-base.llm.*`.
      - Do not output placeholders like `TODO` or "skeleton only" when context is insufficient.
      - If neither KB context nor referenceUrl context exists, must error (Step 2 rule).
 
-## 4.1 Generated Code Contract
+## 4.1 Post-Generation Verification Chain (Repository Validation Path)
+
+The service returns `javaTestCode`; repository-side scripts validate or execute that code. This verification chain is part of the current delivery baseline, but it is **not** a public service-side execution feature.
+
+```mermaid
+flowchart LR
+    A[User requirement] --> B[POST /api/testcase/generate]
+    B --> C[refinedRequirement + citations + javaTestCode]
+    C --> D[GeneratedTestcasePostProcessor]
+    D --> E[Compile Verification]
+    E --> F{Optional execute}
+    F -->|No| G[Compile-only acceptance]
+    F -->|Yes| H[GeneratedJUnitRunner]
+    H --> I[Huawei Cloud API]
+    I --> J[Pass / Fail evidence]
+```
+
+Current repository entrypoints:
+- Compile-only verifier:
+  - `bash scripts/verify_testcase_generation.sh ...`
+- Runner preparation:
+  - `bash scripts/install_generated_test_runner.sh`
+- Generate + compile + optional real execute:
+  - `bash scripts/run_generated_testcase.sh ...`
+
+Rules:
+- Compile-only is the default verification path and should be used as the fast gate.
+- Real execute is an optional validation path for curated scenarios with explicit runtime config.
+- Real execute validates generated code quality and environment truth; it is not part of the service request itself.
+
+## 4.2 Generated Code Contract
 
 The generated `javaTestCode` is not free-form text. It must follow these hard rules:
 
@@ -181,6 +213,22 @@ Current runtime truth for the Lite Server BMS detach-volume negative case:
   - `error_code=ModelArts.7000`
   - `error_msg=Server f13a67fc-11c4-48f9-8f0f-b533a5bcea13 type is BMS, does not support detach volume device.`
 
+## 6.1 Real Execution Validation Contract
+
+Real execution is allowed only as a repository-side verification path. It requires explicit runtime inputs and must remain opt-in.
+
+Required runtime config for the current Huawei Cloud negative case:
+- `HUAWEICLOUD_BASE_URL`
+- `HUAWEICLOUD_AUTH_TOKEN`
+- `HUAWEICLOUD_PROJECT_ID`
+- `HUAWEICLOUD_DEV_SERVER_ID`
+- `HUAWEICLOUD_VOLUME_ID`
+
+Execution boundaries:
+- The service does not store or manage cloud credentials for the user.
+- Execute mode must use the same generated `javaTestCode` returned by `/api/testcase/generate`; it must not rewrite the business assertions by hand.
+- Execute mode is used to verify “generated code can really run”, not to replace the service with a workflow engine.
+
 ## 7. Acceptance Criteria (Batch 3)
 
 - `POST /api/testcase/generate` returns Java testcase code when:
@@ -202,8 +250,29 @@ Current runtime truth for the Lite Server BMS detach-volume negative case:
 - Generated code does not hardcode required resource IDs such as dev-server ID, instance ID, volume ID, or disk ID.
 - Generated code uses only the cited API context and does not silently add extra API calls.
 - When explicit truth is absent, generated code does not fabricate exact status/error assertions.
+- Repository verification entrypoints remain aligned with this contract:
+  - `scripts/verify_testcase_generation.sh`
+  - `scripts/install_generated_test_runner.sh`
+  - `scripts/run_generated_testcase.sh`
 
-## 8. Relationship With Historical Docs
+## 8. Implemented vs Not Implemented (Current Batch 3 Truth)
+
+Implemented:
+- `POST /api/testcase/generate`
+- Requirement refinement -> retrieval -> code generation main path
+- Knowledge-base hit path and referenceUrl fallback path
+- Generated code post-processing and compile-oriented contract checks
+- Compile-only verification script
+- Optional real execution validation script
+
+Not implemented:
+- Any service-side auto execution after generation
+- Planner/workflow/orchestrator style task decomposition
+- Service-side file writing into repository test sources
+- Frontend product UI
+- Productionized multi-scenario batch validation framework
+
+## 9. Relationship With Historical Docs
 
 The following docs are **goal design / larger scope** and must not be treated as Batch 3 execution baseline:
 - `docs/DESIGN.md`

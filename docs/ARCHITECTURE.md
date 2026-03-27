@@ -3,7 +3,7 @@
 > 文档定位：本文件描述“目标架构（P10规格）”，用于对齐方向与模块边界；不等价于当前已实现能力。  
 > 运行与配置基线以 [CONFIG_GUIDE.md](/root/ascend_agent/docs/CONFIG_GUIDE.md) 为准；本文件仅负责说明架构目标与当前实现状态。
 
-## 0. 当前实现状态与后续治理（截至 2026-03-20）
+## 0. 当前实现状态与后续治理（截至 2026-03-27）
 
 ### 0.1 实现状态（收口口径）
 
@@ -38,7 +38,47 @@
 - 任何新增能力必须先标注状态（Implemented/Partial/Stub/Draft），禁止把规划能力写成已完成。
 - 若图与实现发生漂移：优先更新 [CONFIG_GUIDE.md](/root/ascend_agent/docs/CONFIG_GUIDE.md) 的运行基线与本节状态映射，再讨论是否扩展图中模块。
 
+### 0.3 当前 Batch 3 实际架构图（执行真相）
+
+> 这张图描述当前仓库里已经形成的 Batch 3 实际链路。它优先级高于下文目标态大图；若两者冲突，以本节和 `docs/TESTCASE_GENERATION_V3_CURRENT.md` 为准。
+
+```mermaid
+flowchart LR
+    U[用户 / 调用方] --> A[POST /api/testcase/generate]
+    A --> B[Requirement Refinement<br/>LLM]
+    B --> C[Knowledge Retrieval]
+    C -->|KB hit| D[KB Context]
+    C -->|KB miss + referenceUrl| E[Reference URL Fallback]
+    D --> F[Code Generation<br/>LLM]
+    E --> F
+    F --> G[GeneratedTestcasePostProcessor]
+    G --> H[HTTP Response<br/>javaTestCode / citations / refinedRequirement]
+    H --> I[Compile Verifier Script]
+    I --> J{Optional execute}
+    J -->|Yes| K[GeneratedJUnitRunner]
+    K --> L[Huawei Cloud API]
+    L --> M[真实通过 / 真实失败证据]
+
+    C --> N[(Chroma)]
+    C --> O[(Metadata Store)]
+```
+
+### 0.4 文档权威源
+
+- 当前执行真相：
+  - `docs/TESTCASE_GENERATION_V3_CURRENT.md`
+  - `meeting.md`
+- 当前运行入口与脚本：
+  - `README.md`
+  - `scripts/*`
+- 目标态技术设计：
+  - `docs/DESIGN.md`
+- 目标态全景架构：
+  - `docs/ARCHITECTURE.md` 下文除本节外的内容
+
 ## 1. 整体架构（新版 - P10规格）
+
+> 以下仍为目标态全景图，不代表当前仓库已全部实现。阅读当前实现时，先看本文件 `0.3 当前 Batch 3 实际架构图`。
 
 ```mermaid
 graph TB
@@ -110,6 +150,8 @@ graph TB
 ```
 
 ## 2. 核心流程（新版 - P10规格）
+
+> 以下仍为目标态流程，不是当前 Batch 3 已实现流程。
 
 ```mermaid
 flowchart TB
