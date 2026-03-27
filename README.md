@@ -162,6 +162,72 @@ timeout 180 mvn -q -DskipTests package
 
 The script forces `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64` so it does not inherit a stale Java 8 shell environment.
 
+## Generated Testcase Verification
+
+There are now two supported validation paths for generated Java testcases.
+
+### 1. Generate and compile only
+
+Use the existing compile-only verifier when you want a fast gate for `/api/testcase/generate` output shape and Java 21 compilation:
+
+```bash
+bash scripts/verify_testcase_generation.sh \
+  --requirement "验证卸载 Lite Server 系统盘在 BMS 场景下返回 400" \
+  --expected-http-status 400 \
+  --expected-error-code ModelArts.7000 \
+  --expected-error-description "does not support detach volume device"
+```
+
+This path verifies:
+
+- response fields: `javaTestCode`, `citations`, `degraded`, `refinedRequirement`
+- no `TODO` / `placeholder`
+- exactly one public class
+- Java 21 + JUnit 5 compilation
+- explicit expectation fragments when they are provided
+
+### 2. Generate, compile, and optionally execute the generated testcase
+
+Prepare the shared JUnit runner once:
+
+```bash
+bash scripts/install_generated_test_runner.sh
+```
+
+Then run the generated testcase in compile-only mode:
+
+```bash
+bash scripts/run_generated_testcase.sh \
+  --requirement "验证卸载 Lite Server 系统盘在 BMS 场景下返回 400" \
+  --expected-http-status 400 \
+  --expected-error-code ModelArts.7000 \
+  --expected-error-description "does not support detach volume device"
+```
+
+To execute the generated JUnit test against a real environment, export the runtime config expected by the generated code and add `--execute`:
+
+```bash
+export HUAWEICLOUD_BASE_URL="https://modelarts.cn-north-9.myhuaweicloud.com"
+export HUAWEICLOUD_PROJECT_ID="<project_id>"
+export HUAWEICLOUD_DEV_SERVER_ID="<dev_server_id>"
+export HUAWEICLOUD_VOLUME_ID="<volume_id>"
+export HUAWEICLOUD_AUTH_TOKEN="$(cat /root/auth_token.txt)"
+
+bash scripts/run_generated_testcase.sh \
+  --execute \
+  --requirement "验证卸载 Lite Server 系统盘在 BMS 场景下返回 400" \
+  --expected-http-status 400 \
+  --expected-error-code ModelArts.7000 \
+  --expected-error-description "does not support detach volume device"
+```
+
+Notes:
+
+- `scripts/run_generated_testcase.sh` stores artifacts under `ASCEND_AGENT_HOME/generated-testcase-runs/`.
+- The script prepares the shared `GeneratedJUnitRunner` automatically through `scripts/install_generated_test_runner.sh`.
+- Execute mode uses the current shell environment or system properties consumed by the generated testcase itself; the script does not inject cloud credentials on its own.
+- The default API endpoint is `http://127.0.0.1:8080/api/testcase/generate`; override it with `--api` if your service is exposed elsewhere.
+
 ## CI
 
 The repository includes a minimal GitHub Actions workflow at `.github/workflows/ci.yml`.
@@ -193,5 +259,8 @@ CI intentionally does not provision Chroma or boot the full application. It is a
 - Service start script: [scripts/start_service.sh](/root/ascend_agent/scripts/start_service.sh)
 - Service stop script: [scripts/stop_service.sh](/root/ascend_agent/scripts/stop_service.sh)
 - Baseline verification script: [scripts/verify_baseline.sh](/root/ascend_agent/scripts/verify_baseline.sh)
+- Generated testcase runner install script: [scripts/install_generated_test_runner.sh](/root/ascend_agent/scripts/install_generated_test_runner.sh)
+- Generated testcase compile/execute script: [scripts/run_generated_testcase.sh](/root/ascend_agent/scripts/run_generated_testcase.sh)
+- Generated testcase compile-only verifier: [scripts/verify_testcase_generation.sh](/root/ascend_agent/scripts/verify_testcase_generation.sh)
 - CI workflow: [.github/workflows/ci.yml](/root/ascend_agent/.github/workflows/ci.yml)
 - Batch 3 testcase generation execution baseline: [docs/TESTCASE_GENERATION_V3_CURRENT.md](/root/ascend_agent/docs/TESTCASE_GENERATION_V3_CURRENT.md) + latest Batch 3 decisions in `meeting.md`
