@@ -3156,3 +3156,49 @@ P10 真实场景复验：生成代码在未手工清洗 token 的情况下直接
   - 这次真实通过不再依赖“先手工 `tr -d '\\r\\n'` 再执行”
 - 当前最准确口径：
   - 新版本服务下，生成出的真实负例测试代码可以直接带原始 token 文件运行通过
+
+## 2026-03-27 09:42:48 +0800
+
+### 主题
+P10 验收 P8 交付：新增 generated testcase 安装/执行脚本并更新 README
+
+### 参与角色
+- P8：新增真实执行 generated testcase 的脚本入口
+- P10 主线程：代码范围审查、help/安装验收、compile-only 链路验收
+
+### 交付物
+- 新增脚本：
+  - `scripts/install_generated_test_runner.sh`
+  - `scripts/run_generated_testcase.sh`
+- 文档更新：
+  - `README.md`
+- P8 提交：
+  - `8fe856e feat: add generated testcase execution scripts`
+
+### 主线程验收结果
+- 验收通过，收这个脚本交付。
+- 主线程确认：
+  - 脚本改动范围受控，只动了 `scripts/` 和 `README.md`
+  - `install_generated_test_runner.sh --help` 通过
+  - `run_generated_testcase.sh --help` 通过
+  - `install_generated_test_runner.sh` 实跑通过，成功把 `GeneratedJUnitRunner` 编译到：
+    - `ASCEND_AGENT_HOME/tools/generated-test-runner`
+  - `run_generated_testcase.sh` 已成功打通到：
+    - 调用 `/api/testcase/generate`
+    - 落盘 `javaTestCode`
+    - 进入 `javac` 编译阶段
+
+### 关键口径
+- 本轮 compile-only 终止点在 `javac`，但根因不是脚本编排问题，而是当前服务生成出的测试代码本身仍有一个真实缺陷：
+  - `requiredConfig(String env, String prop)` 方法体里引用了 `envKey/propertyKey`
+  - 导致 `javac` 报 `cannot find symbol`
+- 也就是说：
+  - 新脚本已经可用，并且能把“生成代码自身编译失败”准确暴露出来
+  - 当前剩余问题属于代码生成链路质量问题，不属于安装/执行脚本问题
+
+### 额外收口
+- 默认 API 地址已统一成：
+  - `http://127.0.0.1:8080/api/testcase/generate`
+- README 已新增两条标准路径：
+  - 仅生成并编译验证
+  - 生成、编译并可选执行真实测试
