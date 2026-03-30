@@ -64,17 +64,17 @@ body::after {
 .page-shell {
     position: relative;
     z-index: 1;
-    width: min(1200px, calc(100vw - 32px));
+    width: min(1500px, calc(100vw - 64px));
     margin: 0 auto;
-    padding: 32px 0 48px;
+    padding: 36px 0 56px;
 }
 
 .hero {
     display: grid;
-    grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.9fr);
-    gap: 20px;
+    grid-template-columns: minmax(0, 1.7fr) minmax(300px, 0.78fr);
+    gap: 32px;
     align-items: stretch;
-    margin-bottom: 20px;
+    margin-bottom: 32px;
 }
 
 .hero-copy,
@@ -88,7 +88,7 @@ body::after {
 }
 
 .hero-copy {
-    padding: 28px;
+    padding: 32px;
 }
 
 .eyebrow,
@@ -104,13 +104,15 @@ body::after {
 .hero h1 {
     margin: 0;
     font-family: var(--font-display);
-    font-size: clamp(2rem, 4vw, 3.6rem);
-    line-height: 0.96;
-    letter-spacing: -0.04em;
+    max-width: 16ch;
+    font-size: clamp(2.2rem, 4vw, 3.15rem);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
 }
 
 .hero-text {
-    max-width: 62ch;
+    max-width: 68ch;
     margin: 18px 0 0;
     color: var(--muted);
     line-height: 1.7;
@@ -118,9 +120,9 @@ body::after {
 }
 
 .hero-panel {
-    padding: 24px;
+    padding: 26px;
     display: grid;
-    gap: 14px;
+    gap: 16px;
     align-content: center;
     background:
         linear-gradient(135deg, rgba(255, 250, 242, 0.96), rgba(250, 243, 234, 0.92)),
@@ -157,29 +159,47 @@ body::after {
 .workspace {
     display: grid;
     grid-template-columns: minmax(320px, 0.95fr) minmax(0, 1.05fr);
-    gap: 20px;
+    gap: 32px;
 }
 
 .card {
-    padding: 24px;
+    padding: 28px;
+}
+
+.card-form,
+.card-results {
+    min-height: 620px;
+}
+
+.card-form {
+    display: flex;
+    flex-direction: column;
 }
 
 .section-heading {
     display: flex;
     justify-content: space-between;
-    gap: 16px;
+    flex-wrap: wrap;
+    gap: 16px 24px;
     align-items: start;
     margin-bottom: 20px;
+}
+
+.section-heading > div {
+    flex: 1 1 340px;
+    min-width: 0;
 }
 
 .section-heading h2 {
     margin: 0;
     font-size: 1.45rem;
+    text-wrap: balance;
 }
 
 .section-note {
     margin: 0;
-    max-width: 30ch;
+    flex: 0 1 26rem;
+    max-width: 26rem;
     text-align: right;
     line-height: 1.6;
 }
@@ -187,7 +207,9 @@ body::after {
 .form-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-content: start;
     gap: 16px;
+    flex: 1;
 }
 
 .field {
@@ -230,7 +252,7 @@ body::after {
 
 .field textarea {
     resize: vertical;
-    min-height: 156px;
+    min-height: 190px;
     line-height: 1.65;
 }
 
@@ -323,7 +345,7 @@ body::after {
 }
 
 .empty-state {
-    min-height: 260px;
+    min-height: 360px;
     display: grid;
     place-items: center;
     border: 1px dashed rgba(98, 74, 51, 0.2);
@@ -340,6 +362,7 @@ body::after {
 .result-panel {
     display: grid;
     gap: 16px;
+    align-content: start;
 }
 
 .result-block {
@@ -352,14 +375,17 @@ body::after {
 .result-title-row {
     display: flex;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 14px;
-    align-items: center;
+    align-items: flex-start;
     margin-bottom: 12px;
 }
 
 .result-title-row h3 {
     margin: 0;
     font-size: 1.02rem;
+    flex: 1 1 280px;
+    min-width: 0;
 }
 
 .result-text,
@@ -437,19 +463,86 @@ body::after {
     }
 }
 
-@media (max-width: 980px) {
+@media (min-width: 1440px) {
+    .page-shell {
+        width: min(1520px, calc(100vw - 80px));
+    }
+
+    .hero {
+        grid-template-columns: minmax(0, 1.85fr) minmax(320px, 0.72fr);
+        gap: 36px;
+    }
+
+    .hero h1 {
+        max-width: none;
+    }
+
+    .hero-text {
+        max-width: 72ch;
+    }
+
+    .workspace {
+        gap: 36px;
+    }
+
+    .hero-copy,
+    .hero-panel,
+    .card {
+        padding: 32px;
+    }
+
+    .card-form,
+    .card-results {
+        min-height: 690px;
+    }
+
+    .field textarea {
+        min-height: 220px;
+    }
+
+    .empty-state {
+        min-height: 420px;
+    }
+}
+
+@media (max-width: 1200px) {
+    .section-heading {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .section-heading > div,
+    .section-note {
+        flex-basis: auto;
+        max-width: none;
+    }
+
+    .section-note {
+        text-align: left;
+    }
+}
+
+@media (max-width: 1024px) {
+    .result-title-row .ghost-button {
+        flex-basis: 100%;
+        width: 100%;
+    }
+}
+
+@media (max-width: 1110px) {
     .hero,
     .workspace {
         grid-template-columns: 1fr;
     }
 
-    .section-heading {
-        flex-direction: column;
+    .card-form,
+    .card-results {
+        min-height: auto;
     }
 
-    .section-note {
-        text-align: left;
-        max-width: none;
+    .field textarea,
+    .empty-state {
+        min-height: revert;
     }
 }
 

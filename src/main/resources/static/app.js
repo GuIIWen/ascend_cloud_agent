@@ -44,16 +44,16 @@
 
     function renderCitations(citations) {
         if (!Array.isArray(citations) || citations.length === 0) {
-            citationsElement.innerHTML = "<p class=\"citation-id\">No citations returned.</p>";
+            citationsElement.innerHTML = "<p class=\"citation-id\">未返回引用来源。</p>";
             return;
         }
 
         citationsElement.innerHTML = citations.map(function (citation) {
-            const type = escapeHtml(citation.type || "unknown");
+            const type = escapeHtml(citation.type || "未知");
             const apiId = citation.apiId ? "<span class=\"citation-id\">apiId: " + escapeHtml(citation.apiId) + "</span>" : "";
             const source = citation.source
                 ? "<a class=\"citation-link\" href=\"" + escapeHtml(citation.source) + "\" target=\"_blank\" rel=\"noreferrer\">" + escapeHtml(citation.source) + "</a>"
-                : "<span class=\"citation-id\">No source</span>";
+                : "<span class=\"citation-id\">无来源链接</span>";
             return [
                 "<article class=\"citation-item\">",
                 "<div class=\"citation-meta\">",
@@ -100,7 +100,7 @@
                 return payload.error.code;
             }
         }
-        return "Request failed with HTTP " + response.status + ".";
+        return "请求失败，HTTP 状态码为 " + response.status + "。";
     }
 
     async function handleSubmit(event) {
@@ -110,13 +110,13 @@
 
         if (!requestPayload.requirement) {
             clearResults();
-            setStatus("is-error", "Requirement is required.");
+            setStatus("is-error", "需求描述不能为空。");
             document.getElementById("requirement").focus();
             return;
         }
 
         setLoading(true);
-        setStatus("is-loading", "Generating testcase... this may take a short while.");
+        setStatus("is-loading", "正在生成测试用例，可能需要稍等片刻。");
 
         try {
             const response = await fetch("/api/testcase/generate", {
@@ -138,10 +138,10 @@
             }
 
             renderResults(payload || {});
-            setStatus("is-success", "Generation completed successfully.");
+            setStatus("is-success", "测试用例生成完成。");
         } catch (error) {
             clearResults();
-            setStatus("is-error", error && error.message ? error.message : "Network request failed.");
+            setStatus("is-error", error && error.message ? error.message : "网络请求失败。");
         } finally {
             setLoading(false);
         }
@@ -150,15 +150,15 @@
     async function copyCode() {
         const code = javaTestCodeElement.textContent;
         if (!code) {
-            setStatus("is-error", "No generated code available to copy.");
+            setStatus("is-error", "当前没有可复制的生成代码。");
             return;
         }
 
         try {
             await navigator.clipboard.writeText(code);
-            setStatus("is-success", "Java test code copied to clipboard.");
+            setStatus("is-success", "Java 测试代码已复制到剪贴板。");
         } catch (error) {
-            setStatus("is-error", "Clipboard copy failed in this browser context.");
+            setStatus("is-error", "当前浏览器环境不支持复制到剪贴板。");
         }
     }
 

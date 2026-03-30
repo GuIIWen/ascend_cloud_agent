@@ -3,27 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ascend Agent · Testcase Generation</title>
-    <link rel="stylesheet" href="/app.css">
+    <title>Ascend Agent · 测试用例生成</title>
+    <link rel="stylesheet" href="/app.css?v=20260327-1730">
 </head>
 <body>
 <div class="page-shell">
     <header class="hero">
         <div class="hero-copy">
             <p class="eyebrow">Ascend Agent</p>
-            <h1>Generate Java testcases from requirement text</h1>
+            <h1>根据需求描述生成 Java 测试用例</h1>
             <p class="hero-text">
                 输入测试用例描述，可选补充参考 API 链接与期望错误信息，直接查看优化后的描述、引用来源和生成出的 Java 测试代码。
             </p>
         </div>
         <div class="hero-panel">
             <div class="hero-metric">
-                <span class="hero-metric-label">Endpoint</span>
+                <span class="hero-metric-label">接口</span>
                 <strong>POST /api/testcase/generate</strong>
             </div>
             <div class="hero-metric">
-                <span class="hero-metric-label">Output</span>
-                <strong>refined requirement + citations + Java code</strong>
+                <span class="hero-metric-label">输出</span>
+                <strong>优化后的需求描述 + 引用来源 + Java 代码</strong>
             </div>
         </div>
     </header>
@@ -32,15 +32,15 @@
         <section class="card card-form">
             <div class="section-heading">
                 <div>
-                    <p class="section-kicker">Input</p>
-                    <h2>Generation request</h2>
+                    <p class="section-kicker">输入</p>
+                    <h2>生成请求</h2>
                 </div>
                 <p class="section-note">`requirement` 必填，其余字段按需补充。</p>
             </div>
 
             <form id="generation-form" class="form-grid" novalidate>
                 <label class="field field-full" for="requirement">
-                    <span>Requirement <em>*</em></span>
+                    <span>需求描述 <em>*</em></span>
                     <textarea
                             id="requirement"
                             name="requirement"
@@ -50,7 +50,7 @@
                 </label>
 
                 <label class="field field-full" for="referenceUrl">
-                    <span>Reference URL</span>
+                    <span>参考链接</span>
                     <input
                             id="referenceUrl"
                             name="referenceUrl"
@@ -60,7 +60,7 @@
                 </label>
 
                 <label class="field" for="expectedHttpStatus">
-                    <span>Expected HTTP Status</span>
+                    <span>期望 HTTP 状态码</span>
                     <input
                             id="expectedHttpStatus"
                             name="expectedHttpStatus"
@@ -72,7 +72,7 @@
                 </label>
 
                 <label class="field" for="expectedErrorCode">
-                    <span>Expected Error Code</span>
+                    <span>期望错误码</span>
                     <input
                             id="expectedErrorCode"
                             name="expectedErrorCode"
@@ -81,7 +81,7 @@
                 </label>
 
                 <label class="field field-full" for="expectedErrorDescription">
-                    <span>Expected Error Description</span>
+                    <span>期望错误描述</span>
                     <input
                             id="expectedErrorDescription"
                             name="expectedErrorDescription"
@@ -91,24 +91,24 @@
 
                 <div class="actions">
                     <button id="submit-button" class="primary-button" type="submit">
-                        <span class="button-text">Generate testcase</span>
+                        <span class="button-text">生成测试用例</span>
                         <span class="button-spinner" aria-hidden="true"></span>
                     </button>
-                    <p class="actions-hint">页面不会执行测试，只负责生成与展示结果。</p>
+                    <p class="actions-hint">页面不会执行测试，仅负责生成并展示结果。</p>
                 </div>
             </form>
 
             <div id="status-banner" class="status-banner is-idle" role="status" aria-live="polite">
                 <span class="status-dot"></span>
-                <span id="status-text">Ready for a new generation request.</span>
+                <span id="status-text">已准备好接收新的生成请求。</span>
             </div>
         </section>
 
         <section class="card card-results">
             <div class="section-heading">
                 <div>
-                    <p class="section-kicker">Output</p>
-                    <h2>Generation result</h2>
+                    <p class="section-kicker">输出</p>
+                    <h2>生成结果</h2>
                 </div>
             </div>
 
@@ -119,22 +119,22 @@
             <div id="result-panel" class="result-panel" hidden>
                 <article class="result-block">
                     <div class="result-title-row">
-                        <h3>Refined Requirement</h3>
+                        <h3>优化后的需求描述</h3>
                     </div>
                     <pre id="refinedRequirement" class="result-text"></pre>
                 </article>
 
                 <article class="result-block">
                     <div class="result-title-row">
-                        <h3>Citations</h3>
+                        <h3>引用来源</h3>
                     </div>
                     <div id="citations" class="citation-list"></div>
                 </article>
 
                 <article class="result-block">
                     <div class="result-title-row">
-                        <h3>Java Test Code</h3>
-                        <button id="copy-button" class="ghost-button" type="button">Copy code</button>
+                        <h3>Java 测试代码</h3>
+                        <button id="copy-button" class="ghost-button" type="button">复制代码</button>
                     </div>
                     <pre id="javaTestCode" class="code-block"></pre>
                 </article>
@@ -143,6 +143,6 @@
     </main>
 </div>
 
-<script src="/app.js"></script>
+<script src="/app.js?v=20260327-1730"></script>
 </body>
 </html>
