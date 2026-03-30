@@ -29,6 +29,229 @@
   - 若是一次真实调用或真实执行，必须写清请求、运行参数边界或证据文件路径
   - 若结论会影响设计基线，必须同步更新对应设计文档
 
+## 2026-03-30 11:37:54 +0800
+
+### 主题
+P10 验收 testcase 生成第一阶段治理：P7 三轮修正后，live 生成与编译验收通过
+
+### 参与角色
+- P10 主线程：live 验收 owner、问题收敛、会议纪要收口
+- P7：按 P10 范围做三轮增量修改
+
+### 变更背景
+- 第一阶段治理拍板后，P7 先后完成：
+  - `skill/prompt/postprocessor/validator/tests` 第一轮改造
+  - `JUnit5 import/@Test` 缺口修复
+  - 显式负例断言 prompt/retry 收口增强
+- 主线程真实验收过程中，先后打到两类 live 缺口：
+  - 生成物不是稳定可识别的 JUnit5 测试类
+  - 显式负例场景仍反复退化成 `body.contains(...)` 或缺少 `assertEquals(400, response.statusCode())`
+
+### 本次决策
+- 第一阶段治理继续维持“四层收口”路线，不放松 validator。
+- 对 live 缺口的收口方式确定为：
+  - `postprocessor` 自动补齐简写 JUnit5 注解所需 import，但没有 `@Test` 方法仍硬失败
+  - `prompt` 明确要求：
+    - 显式导入 JUnit5 注解
+    - 至少一个 `@Test` 方法
+    - 显式负例场景必须写明确状态断言
+    - 显式错误码/错误描述必须先解析到变量，再断言变量
+  - `retry prompt` 根据校验失败原因输出定向修正指令，而不是只给泛化约束
+  - `validator` 只增强错误文案可执行性，不放松门禁
+
+### 验收方法
+- 单测：
+  - `mvn -q -Dtest=TestcasePromptBuilderTest,GeneratedTestcasePostProcessorTest,TestcaseGenerationServiceImplTest test`
+- 打包：
+  - `mvn -q -DskipTests package`
+- 服务重启：
+  - `bash scripts/stop_service.sh`
+  - `bash scripts/start_service.sh`
+- 运行态：
+  - `GET http://127.0.0.1:8080/actuator/health => 200`
+- live 生成与编译验收：
+  - `bash scripts/verify_testcase_generation.sh --requirement "验证卸载 Lite Server 系统盘在 BMS 场景下返回 400，并校验错误码和错误描述" --reference-url "https://support.huaweicloud.com/api-modelarts/DetachDevServerVolume.html" --expected-http-status 400 --expected-error-code ModelArts.7000 --expected-error-description "does not support detach volume device"`
+
+### 验收结果
+- 单测通过，打包通过，服务已重启：
+  - PID：`2130568`
+  - Java：`21`
+  - health：`200`
+- live 生成与编译验收通过：
+  - 脚本输出：`verification passed`
+  - 响应证据：`/tmp/testcase-generate-response.zTWxXI.json`
+  - 生成类证据：`/tmp/DetachDevServerVolumeTest.java`
+- 本次成功生成的代码已经满足第一阶段验收线：
+  - 使用 `@BeforeAll` 加载 runtime config，无字段初始化期读取配置
+  - 使用 `requiredConfig(...)`
+  - 带 `connectTimeout` 和 `request.timeout`
+  - 使用 `assertEquals(400, response.statusCode())`
+  - 先解析 `errorCode` / `errorDescription` 变量，再断言变量
+  - citations 收敛到目标 API：`DetachDevServerVolume.html`
+
+### 风险/未完成项
+- 当前 live 验收通过的是“接口返回 + 生成物编译通过”，不是“生成测试在真实云侧执行通过”。
+- 本次生成代码里错误描述提取 helper 使用的是 `error_description` 字段假设；华为云常见错误响应字段往往是 `error_msg`，该点仍需后续结合真实响应体继续收口。
+- `refinedRequirement` 目前仍偏保守，输出为“待确认/调用目标接口”，说明 requirement refinement 质量仍有提升空间，但未阻塞本轮生成与编译验收。
+
+### 后续动作
+- 下一轮优先收口“真实错误响应字段名对齐”，避免生成代码在运行态因 `error_description` / `error_msg` 键名不一致而误判。
+- 若后续进入执行态验收，必须补“真实 token + 真实资源 + 真实响应体”的运行结果记录，不能只停在 compile-only。
+
+### 关键证据
+- `/tmp/testcase-generate-response.zTWxXI.json`
+- `/tmp/DetachDevServerVolumeTest.java`
+- `/root/ascend_agent/.ascend_agent/logs/service.log`
+- `src/main/java/com/agent/service/testcase/TestcasePromptBuilder.java`
+- `src/main/java/com/agent/service/testcase/GeneratedTestcasePostProcessor.java`
+- `src/main/java/com/agent/service/testcase/TestcaseGenerationServiceImpl.java`
+
+## 2026-03-30 10:40:42 +0800
+
+### 主题
+P10 拍板 testcase 生成质量治理方案：不用人工改生成代码，按“skill/骨架/后处理/校验”四层收口，并下发 P7 做第一阶段改造
+
+### 参与角色
+- P10 主线程：方案拍板、会议纪要收口、后续验收 owner
+- P8：方案讨论与治理建议输入
+- P7：第一阶段执行 owner
+
+### 变更背景
+- 最新一次真实 `POST /api/testcase/generate` 返回的代码虽然可编译，但主线程与盲审都确认存在结构性质量问题：
+  - 配置读取落在静态字段初始化
+  - `Optional.ofNullable(requiredConfig(...)).orElse(requiredConfig(...))` 导致重复求值
+  - 真实 HTTP 调用缺少超时治理
+  - 错误断言仍依赖脆弱的整包 `body.contains(...)`
+- 用户已明确：目标不是人工修改生成结果，而是让系统自己稳定产出更好的代码。
+- 当前仓库已有的质量收口点主要分布在：
+  - `TestcasePromptBuilder`
+  - `GeneratedTestcasePostProcessor`
+  - `TestcaseGenerationServiceImpl` 重试/校验
+  - `.codex/skills/huawei-testcase-generation/SKILL.md`
+
+### 本次决策
+- 统一路线：不走“人工改输出”，也不继续只堆 prompt 文案；改走四层收口：
+  - `skill`：沉淀生成规范和典型禁用项
+  - `模板骨架`：固定测试类主结构，减少模型自由发挥
+  - `postprocessor`：接管配置生命周期和危险写法归一化/拒绝
+  - `validator`：把编译通过之外的结构质量问题变成硬门禁
+- 第一阶段只做短期可落地项，不做大重构：
+  - 在 `skill + prompt` 中引入 canonical skeleton 约束，明确：
+    - 配置加载不得出现在字段初始化
+    - 统一走 `requiredConfig(...)`
+    - HTTP 调用必须包含超时
+    - 错误断言不得对整包 body 做脆弱字符串匹配
+  - 在 `postprocessor` 中新增结构收口：
+    - 识别并压平 `Optional.ofNullable(requiredConfig(...)).orElse(requiredConfig(...))`
+    - 禁止配置类绑定在字段初始化阶段直接执行 `requiredConfig(...)`
+  - 在 `validator` 中新增硬校验：
+    - 缺少 HTTP timeout 直接判失败
+    - 显式错误断言场景下，禁止整包 `body.contains(...)` 风格断言
+- 第二阶段再做中期演进：
+  - 不再让模型生成完整类，而是生成结构化槽位/中间表示
+  - 服务端按固定模板渲染完整测试类
+  - 把失败原因结构化成 failure code，回灌到 retry prompt 和回归集
+
+### 第一阶段实施范围
+- P7 本轮只允许改以下范围：
+  - `.codex/skills/huawei-testcase-generation/SKILL.md`
+  - `src/main/java/com/agent/service/testcase/TestcasePromptBuilder.java`
+  - `src/main/java/com/agent/service/testcase/GeneratedTestcasePostProcessor.java`
+  - `src/main/java/com/agent/service/testcase/TestcaseGenerationServiceImpl.java`
+  - `src/test/java/com/agent/service/testcase/TestcasePromptBuilderTest.java`
+  - `src/test/java/com/agent/service/testcase/GeneratedTestcasePostProcessorTest.java`
+  - `src/test/java/com/agent/service/testcase/TestcaseGenerationServiceImplTest.java`
+- 本轮非目标：
+  - 不改 controller / execute contract
+  - 不引入新 public API
+  - 不做结构化 IR 渲染器
+  - 不做真实云资源 profile 新扩展
+
+### 验收线
+- generate-only 现有行为不得回归
+- 新生成代码至少要满足：
+  - 不再出现静态字段初始化阶段读取 runtime config
+  - 不再出现重复求值的 `Optional.ofNullable(requiredConfig(...)).orElse(...)`
+  - HTTP 客户端/请求层必须带 timeout
+  - 显式错误码/错误描述场景下，不允许整包 `body.contains(...)` 断言
+- 主线程验收方式：
+  - 单测回归
+  - 重新调用一次真实 `POST /api/testcase/generate`
+  - 对生成代码做结构审查与编译验收
+
+### 后续动作
+- P7 立即按第一阶段范围改代码与 skill
+- P10 主线程负责最终验收，不接受只改 prompt 不改校验的半套方案
+
+### 关键口径
+- `skill` 可以做，但只能作为上层规范，不是唯一保险丝。
+- 真正的稳定性要靠“skill + 骨架 + postprocessor + validator”四层同时收口。
+- 当前拍板的是第一阶段治理，不是最终形态；最终形态仍是“结构化产物 + 服务端模板渲染”。
+
+## 2026-03-30 09:32:03 +0800
+
+### 主题
+P10 收口 execute 模式文档基线：同路由新增执行模式，资源生命周期下沉稳定执行层
+
+### 参与角色
+- P10 主线程：文档收口与会议纪要验收
+- P9：已验收 execute 模式方案 owner
+- P8 文档执行者：落 README / DESIGN / V3 / meeting
+
+### 变更背景
+- 当前已收口的真实基线是：`POST /api/testcase/generate` 只生成测试代码，generate-only 是既有默认行为。
+- 仓内曾有“生成后编译/执行”的脚本级验证和历史验收，但这不是当前公开服务 contract，也不等价于服务端已经接管资源生命周期。
+- 需要把“自动开通资源 -> 执行生成测试 -> 自动释放资源”的已验收方案写进文档，同时把职责边界从 LLM 生成代码中剥离出来。
+- 当前主工作区代码合同已经收口为 `execution.enabled` + `execution.resourceProfile`，不能再保留旧的扁平 execute 开关口径。
+
+### 本次决策
+- 当前已实现基线不变：
+  - 不带 `execution` 或 `execution.enabled!=true` 时，`POST /api/testcase/generate` 保持 generate-only
+  - generate-only 的请求/返回口径保持不变
+- 本轮新增的是同一路由下的 execute 能力，通过请求体中的 `execution.enabled=true` 打开，不新增第二个公开执行路由。
+- `execute` 模式由服务端稳定执行层负责：
+  - 根据白名单 `execution.resourceProfile` 自动开通资源
+  - 复用既有生成链路产出测试代码
+  - 完成编译与测试执行
+  - 在成功和失败路径都执行 release
+- LLM 生成代码职责收口为：
+  - 只负责 API 调用、请求构造、断言
+  - 不负责资源开通、资源释放、通用资源编排、生命周期治理
+- 首版不引入复杂 orchestrator，不做通用资源编排平台，只支持白名单 `execution.resourceProfile`。
+- 错误语义收口为：
+  - `execution.enabled=true` 但缺失 `execution.resourceProfile` 返回 `400`
+  - `execution.enabled=true` 但 `execution.resourceProfile` 非白名单返回 `400`
+- `execute` 响应必须显式暴露 `provision / compile / test / release` 四段状态；即使失败也必须保留 release 结果。
+
+### 验收方法
+- 主线程逐份复核以下文档是否表达一致：
+  - `README.md`
+  - `docs/TESTCASE_GENERATION_V3_CURRENT.md`
+  - `docs/DESIGN.md`
+  - `meeting.md`
+
+### 验收结果
+- 四份文档已统一收口：
+  - generate-only 仍是当前默认基线
+  - execute 是本轮新增模式，不追溯成历史已实现能力
+  - 公开入口仍只有 `/api/testcase/generate`
+  - 资源生命周期职责已下沉到稳定执行层，不再混入生成代码
+
+### 风险/未完成项
+- 当前收口的是文档和会议结论，不代表 execute 模式代码已经在 `src/main/java` 落地。
+- 白名单 `execution.resourceProfile` 的具体列表、入参映射、幂等和配额策略，仍需后续实现提交继续细化。
+- 仓内历史脚本验证材料仍保留为证据，但不能再被表述成“当前公开 execute 能力”。
+
+### 后续动作
+- execute 模式后续落地时，必须按本文档暴露四段状态，并保证失败后 release。
+- 若后续扩展更多场景，只能在白名单 profile 内增量推进，不得借机扩成通用 orchestrator / resource platform。
+
+### 关键证据
+- `README.md`
+- `docs/TESTCASE_GENERATION_V3_CURRENT.md`
+- `docs/DESIGN.md`
+- `meeting.md`
+
 ## 2026-03-27 12:14:33 +0800
 
 ### 主题

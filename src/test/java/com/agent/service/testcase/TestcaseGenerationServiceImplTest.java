@@ -233,10 +233,11 @@ class TestcaseGenerationServiceImplTest {
                             @Test
                             void testGenerated() {
                                 HttpResponse<String> response = null;
-                                String body = response.body();
+                                String errorCode = "MODELARTS_001";
+                                String errorDescription = "示例错误描述";
                                 assertEquals(400, response.statusCode());
-                                assertTrue(body.contains("MODELARTS_001"));
-                                assertTrue(body.contains("示例错误描述"));
+                                assertEquals("MODELARTS_001", errorCode);
+                                assertEquals("示例错误描述", errorDescription);
                             }
                         }
                         """);
@@ -301,6 +302,273 @@ class TestcaseGenerationServiceImplTest {
 
         assertTrue(result.getJavaTestCode().contains("public class DeleteWorkflowTest"));
         verify(llmService, times(3)).generateTestCode(anyString());
+    }
+
+    @Test
+    void generateRetriesWhenFirstAttemptMissesTestMethodAndSecondAttemptUsesShortJunitAnnotations() throws IOException {
+        String referenceUrl = "https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html";
+        Metadata metadata = new Metadata();
+        metadata.put("source", referenceUrl);
+        metadata.put("title", "ModelArts API");
+        Document document = Document.from("DELETE /v2/{project_id}/workflows/{workflow_id}", metadata);
+
+        when(llmService.generateTestCode(anyString()))
+                .thenReturn("优化后的需求")
+                .thenReturn("""
+                        public class DetachDevServerVolumeTest {
+                            private static String authToken;
+
+                            @BeforeAll
+                            static void loadRuntimeConfig() {
+                                authToken = requiredConfig("HUAWEICLOUD_AUTH_TOKEN", "hwcloud.auth.token");
+                            }
+
+                            private static String requiredConfig(String envKey, String propertyKey) {
+                                return "";
+                            }
+                        }
+                        """)
+                .thenReturn("""
+                        public class DetachDevServerVolumeTest {
+                            private static String authToken;
+
+                            @BeforeAll
+                            static void loadRuntimeConfig() {
+                                authToken = requiredConfig("HUAWEICLOUD_AUTH_TOKEN", "hwcloud.auth.token");
+                            }
+
+                            @Test
+                            void detachVolume() {
+                            }
+
+                            private static String requiredConfig(String envKey, String propertyKey) {
+                                return "";
+                            }
+                        }
+                        """);
+        when(knowledgeBaseService.search(anyString(), anyInt())).thenReturn(List.of());
+        when(webDocumentCrawler.crawl(referenceUrl)).thenReturn(document);
+
+        TestcaseGenerationResult result = service.generate(
+                new TestcaseGenerationRequest("验证卸载 Lite Server 系统盘", referenceUrl));
+
+        assertTrue(result.getJavaTestCode().contains("import org.junit.jupiter.api.BeforeAll;"));
+        assertTrue(result.getJavaTestCode().contains("import org.junit.jupiter.api.Test;"));
+        assertTrue(result.getJavaTestCode().contains("@Test"));
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmService, times(3)).generateTestCode(promptCaptor.capture());
+        String retryPrompt = promptCaptor.getAllValues().get(2);
+        assertTrue(retryPrompt.contains("must be a JUnit5 test class"));
+        assertTrue(retryPrompt.contains("至少保留一个 @Test 方法"));
+    }
+
+    @Test
+    void generateRetriesWhenRealHttpCallMissesTimeout() throws IOException {
+        String referenceUrl = "https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html";
+        Metadata metadata = new Metadata();
+        metadata.put("source", referenceUrl);
+        metadata.put("title", "ModelArts API");
+        Document document = Document.from("DELETE /v2/{project_id}/workflows/{workflow_id}", metadata);
+
+        when(llmService.generateTestCode(anyString()))
+                .thenReturn("优化后的需求")
+                .thenReturn("""
+                        import java.net.URI;
+                        import java.net.http.HttpClient;
+                        import java.net.http.HttpRequest;
+                        import java.net.http.HttpResponse;
+                        import org.junit.jupiter.api.Test;
+                        import static org.junit.jupiter.api.Assertions.*;
+
+                        public class DeleteWorkflowTest {
+                            @Test
+                            void testGenerated() throws Exception {
+                                HttpClient client = HttpClient.newHttpClient();
+                                HttpRequest request = HttpRequest.newBuilder()
+                                        .uri(URI.create("https://example.com"))
+                                        .DELETE()
+                                        .build();
+                                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                                assertNotNull(response);
+                            }
+                        }
+                        """)
+                .thenReturn("""
+                        import java.net.URI;
+                        import java.net.http.HttpClient;
+                        import java.net.http.HttpRequest;
+                        import java.net.http.HttpResponse;
+                        import java.time.Duration;
+                        import org.junit.jupiter.api.Test;
+                        import static org.junit.jupiter.api.Assertions.*;
+
+                        public class DeleteWorkflowTest {
+                            @Test
+                            void testGenerated() throws Exception {
+                                HttpClient client = HttpClient.newBuilder()
+                                        .connectTimeout(Duration.ofSeconds(10))
+                                        .build();
+                                HttpRequest request = HttpRequest.newBuilder()
+                                        .uri(URI.create("https://example.com"))
+                                        .timeout(Duration.ofSeconds(30))
+                                        .DELETE()
+                                        .build();
+                                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                                assertNotNull(response);
+                            }
+                        }
+                        """);
+        when(knowledgeBaseService.search(anyString(), anyInt())).thenReturn(List.of());
+        when(webDocumentCrawler.crawl(referenceUrl)).thenReturn(document);
+
+        TestcaseGenerationResult result = service.generate(
+                new TestcaseGenerationRequest("验证删除工作流", referenceUrl));
+
+        assertTrue(result.getJavaTestCode().contains("connectTimeout(Duration.ofSeconds(10))"));
+        assertTrue(result.getJavaTestCode().contains("timeout(Duration.ofSeconds(30))"));
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmService, times(3)).generateTestCode(promptCaptor.capture());
+        String retryPrompt = promptCaptor.getAllValues().get(2);
+        assertTrue(retryPrompt.contains("must configure HTTP timeout"));
+    }
+
+    @Test
+    void generateRetriesWhenExplicitErrorAssertionUsesWholeBodyContains() throws IOException {
+        String referenceUrl = "https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html";
+        Metadata metadata = new Metadata();
+        metadata.put("source", referenceUrl);
+        metadata.put("title", "ModelArts API");
+        Document document = Document.from("DELETE /v2/{project_id}/workflows/{workflow_id}", metadata);
+
+        when(llmService.generateTestCode(anyString()))
+                .thenReturn("优化后的需求")
+                .thenReturn("""
+                        import java.net.http.HttpResponse;
+                        import org.junit.jupiter.api.Test;
+                        import static org.junit.jupiter.api.Assertions.*;
+
+                        public class DeleteWorkflowTest {
+                            @Test
+                            void testGenerated() {
+                                HttpResponse<String> response = null;
+                                String body = response.body();
+                                assertEquals(400, response.statusCode());
+                                assertTrue(body.contains("MODELARTS_001"));
+                                assertTrue(body.contains("示例错误描述"));
+                            }
+                        }
+                        """)
+                .thenReturn("""
+                        import java.net.http.HttpResponse;
+                        import org.junit.jupiter.api.Test;
+                        import static org.junit.jupiter.api.Assertions.*;
+
+                        public class DeleteWorkflowTest {
+                            @Test
+                            void testGenerated() {
+                                HttpResponse<String> response = null;
+                                String errorCode = "MODELARTS_001";
+                                String errorDescription = "示例错误描述";
+                                assertEquals(400, response.statusCode());
+                                assertEquals("MODELARTS_001", errorCode);
+                                assertEquals("示例错误描述", errorDescription);
+                            }
+                        }
+                        """);
+        when(knowledgeBaseService.search(anyString(), anyInt())).thenReturn(List.of());
+        when(webDocumentCrawler.crawl(referenceUrl)).thenReturn(document);
+
+        TestcaseGenerationResult result = service.generate(
+                new TestcaseGenerationRequest("验证删除工作流", referenceUrl, 400, "MODELARTS_001", "示例错误描述"));
+
+        assertFalse(result.getJavaTestCode().contains("body.contains("));
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmService, times(3)).generateTestCode(promptCaptor.capture());
+        String retryPrompt = promptCaptor.getAllValues().get(2);
+        assertTrue(retryPrompt.contains("must not assert explicit error code/description via whole-body contains"));
+        assertTrue(retryPrompt.contains("parse errorCode/errorDescription into variables"));
+    }
+
+    @Test
+    void generateRetryPromptGuidesNegativeCaseFromWholeBodyContainsToExplicitStatusAssertion() throws IOException {
+        String referenceUrl = "https://support.huaweicloud.com/api-modelarts/modelarts_03_0002.html";
+        Metadata metadata = new Metadata();
+        metadata.put("source", referenceUrl);
+        metadata.put("title", "ModelArts API");
+        Document document = Document.from("DELETE /v2/{project_id}/workflows/{workflow_id}", metadata);
+
+        when(llmService.generateTestCode(anyString()))
+                .thenReturn("优化后的需求")
+                .thenReturn("""
+                        import java.net.http.HttpResponse;
+                        import org.junit.jupiter.api.Test;
+                        import static org.junit.jupiter.api.Assertions.*;
+
+                        public class DeleteWorkflowTest {
+                            @Test
+                            void testGenerated() {
+                                HttpResponse<String> response = null;
+                                String body = response.body();
+                                assertEquals(400, response.statusCode());
+                                assertTrue(body.contains("MODELARTS_001"));
+                                assertTrue(body.contains("示例错误描述"));
+                            }
+                        }
+                        """)
+                .thenReturn("""
+                        import java.net.http.HttpResponse;
+                        import org.junit.jupiter.api.Test;
+                        import static org.junit.jupiter.api.Assertions.*;
+
+                        public class DeleteWorkflowTest {
+                            @Test
+                            void testGenerated() {
+                                HttpResponse<String> response = null;
+                                String errorCode = "MODELARTS_001";
+                                String errorDescription = "示例错误描述";
+                                assertEquals("MODELARTS_001", errorCode);
+                                assertEquals("示例错误描述", errorDescription);
+                            }
+                        }
+                        """)
+                .thenReturn("""
+                        import java.net.http.HttpResponse;
+                        import org.junit.jupiter.api.Test;
+                        import static org.junit.jupiter.api.Assertions.*;
+
+                        public class DeleteWorkflowTest {
+                            @Test
+                            void testGenerated() {
+                                HttpResponse<String> response = null;
+                                String errorCode = "MODELARTS_001";
+                                String errorDescription = "示例错误描述";
+                                assertEquals(400, response.statusCode());
+                                assertEquals("MODELARTS_001", errorCode);
+                                assertEquals("示例错误描述", errorDescription);
+                            }
+                        }
+                        """);
+        when(knowledgeBaseService.search(anyString(), anyInt())).thenReturn(List.of());
+        when(webDocumentCrawler.crawl(referenceUrl)).thenReturn(document);
+
+        TestcaseGenerationResult result = service.generate(
+                new TestcaseGenerationRequest("验证删除工作流", referenceUrl, 400, "MODELARTS_001", "示例错误描述"));
+
+        assertTrue(result.getJavaTestCode().contains("assertEquals(400, response.statusCode())"));
+        assertTrue(result.getJavaTestCode().contains("String errorCode = \"MODELARTS_001\";"));
+        assertTrue(result.getJavaTestCode().contains("String errorDescription = \"示例错误描述\";"));
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmService, times(4)).generateTestCode(promptCaptor.capture());
+        String retryPromptAfterWholeBodyContains = promptCaptor.getAllValues().get(2);
+        String retryPromptAfterMissingStatus = promptCaptor.getAllValues().get(3);
+        assertTrue(retryPromptAfterWholeBodyContains.contains("assertEquals(400, response.statusCode())"));
+        assertTrue(retryPromptAfterWholeBodyContains.contains("parse errorCode/errorDescription into variables"));
+        assertTrue(retryPromptAfterMissingStatus.contains("assertEquals(400, response.statusCode())"));
+        assertTrue(retryPromptAfterMissingStatus.contains("must assert HTTP status 400"));
     }
 
     @Test
@@ -391,10 +659,11 @@ class TestcaseGenerationServiceImplTest {
                             @Test
                             void testGenerated() {
                                 HttpResponse<String> response = null;
-                                String body = response.body();
+                                String errorCode = "ModelArts.7000";
+                                String errorDescription = "does not support detach volume device";
                                 assertEquals(400, response.statusCode());
-                                assertTrue(body.contains("ModelArts.7000"));
-                                assertTrue(body.contains("does not support detach volume device"));
+                                assertEquals("ModelArts.7000", errorCode);
+                                assertEquals("does not support detach volume device", errorDescription);
                             }
                         }
                         """);
@@ -439,10 +708,11 @@ class TestcaseGenerationServiceImplTest {
                             @Test
                             void detach() {
                                 HttpResponse<String> response = null;
-                                String body = response.body();
+                                String errorCode = "ModelArts.7000";
+                                String errorDescription = "does not support detach volume device";
                                 assertEquals(400, response.statusCode());
-                                assertTrue(body.contains("ModelArts.7000"));
-                                assertTrue(body.contains("does not support detach volume device"));
+                                assertEquals("ModelArts.7000", errorCode);
+                                assertEquals("does not support detach volume device", errorDescription);
                             }
                         }
                         """);

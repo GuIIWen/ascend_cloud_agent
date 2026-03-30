@@ -77,7 +77,7 @@ public class TestcasePromptBuilder {
                 4) 优先使用上下文中的接口、字段和约束。
                 5) 若上下文中有HTTP接口信息，可使用常见HTTP客户端写法。
                 6) 认证、项目ID、区域等运行参数不要写死成占位符常量，统一从环境变量或系统属性读取。
-                7) 生成结果必须是一个且仅一个 public class，使用 JUnit5 注解，能被 Java 21 直接编译。
+                7) 生成结果必须是一个且仅一个 public class，显式导入所使用的 JUnit5 注解，且至少包含一个 `@Test` 方法，能被 Java 21 直接编译。
                 8) 所有路径参数或资源标识字段必须走 requiredConfig(...)，至少包括 DEV_SERVER_ID / SERVER_ID / INSTANCE_ID / VOLUME_ID / DISK_ID，不得硬编码诸如 lite-123、system、demo-id 之类字面量。
                 9) 如果上下文只给出了一个 API，只能围绕这一个 API 生成测试，不要自行扩展额外接口做二次校验。
                 10) 如果上下文未明确给出成功/失败真值，不要臆造状态码、错误码、状态迁移或响应字段断言，也不要硬编码 200/400 或 body.contains("operation_id") 这类断言。
@@ -96,6 +96,48 @@ public class TestcasePromptBuilder {
                 16) 如果显式期望已提供（expectedHttpStatus / expectedErrorCode / expectedErrorDescription），断言必须优先使用显式期望，不得被模型自行改写。
                 17) 如果显式状态码或错误码未提供，且上下文没有明确状态码/错误码，不要臆造具体状态码或错误码。
                 18) 如果 expectedErrorDescription 未提供，且上下文没有明确错误描述或明确响应字段，不要臆造具体错误描述，也不要补写 body.contains("operation_id") 等字段断言。
+                19) 遵循 canonical skeleton：如果声明类级别运行参数字段，只声明 `private static String ...;`，不要在字段初始化阶段调用 requiredConfig(...)、System.getenv(...)、System.getProperty(...) 或 Optional.ofNullable(...).orElse(...)。
+                20) 所有运行参数读取都统一走 requiredConfig(envKey, propertyKey)；不要写 Optional.ofNullable(requiredConfig(...)).orElse(requiredConfig(...)) 这种重复求值包装。
+                21) 只要存在真实 HTTP 调用，就必须显式配置 timeout；例如 `HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))` 与 `HttpRequest.newBuilder().timeout(Duration.ofSeconds(30))`。
+                22) 当 expectedErrorCode 或 expectedErrorDescription 已提供时，必须断言具体错误字段或已解析变量；禁止 `body.contains(...)`、`response.body().contains(...)` 这类整包字符串匹配。
+                23) 在显式负例期望场景下，必须写出明确状态断言，例如 `assertEquals(400, response.statusCode())`。
+                24) 在显式负例期望场景下，必须先把错误码/错误描述解析到变量，再断言变量；例如 `String errorCode = ...; String errorDescription = ...; assertEquals("xxx", errorCode); assertEquals("yyy", errorDescription);`。
+
+                canonical skeleton 示例：
+                import org.junit.jupiter.api.BeforeAll;
+                import org.junit.jupiter.api.Test;
+                
+                public class XxxTest {
+                    private static String authToken;
+                    private static String projectId;
+                    private static String baseUrl;
+
+                    @BeforeAll
+                    static void loadRuntimeConfig() {
+                        authToken = requiredConfig("HUAWEICLOUD_AUTH_TOKEN", "hwcloud.auth.token");
+                        projectId = requiredConfig("HUAWEICLOUD_PROJECT_ID", "hwcloud.project.id");
+                        baseUrl = requiredConfig("HUAWEICLOUD_BASE_URL", "hwcloud.base.url");
+                    }
+
+                    @Test
+                    void testApi() throws Exception {
+                        HttpClient client = HttpClient.newBuilder()
+                                .connectTimeout(Duration.ofSeconds(10))
+                                .build();
+                        HttpRequest request = HttpRequest.newBuilder()
+                                .timeout(Duration.ofSeconds(30))
+                                .build();
+                    }
+                }
+
+                显式负例断言 skeleton 示例：
+                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                assertEquals(400, response.statusCode());
+                String errorCode = extractErrorCode(response.body());
+                String errorDescription = extractErrorDescription(response.body());
+                assertEquals("ModelArts.7000", errorCode);
+                assertEquals("does not support detach volume device", errorDescription);
+                // 不要写 assertTrue(response.body().contains("ModelArts.7000"))
 
                 来源模式：%s
                 显式期望：
@@ -118,6 +160,7 @@ public class TestcasePromptBuilder {
     }
 
     String buildRetryGenerationPrompt(String originalPrompt, String validationError, int attempt) {
+        String targetedFixes = buildTargetedRetryFixes(validationError);
         return """
                 %s
 
@@ -129,10 +172,44 @@ public class TestcasePromptBuilder {
                 1) 只输出完整 Java 代码，不要解释。
                 2) 所有配置读取统一使用 requiredConfig(...)，不要直接写 System.getenv(\"HUAWEICLOUD_...\") 或 System.getProperty(\"hwcloud....\")。
                 3) 如果上下文只给了一个 API，不得扩展第二个 API。
-                """.formatted(originalPrompt, attempt, validationError);
+                4) 不要在字段初始化阶段读取配置；类级别配置字段只声明，统一在 @BeforeAll 中赋值。
+                5) 如果存在真实 HTTP 调用，必须显式配置 timeout。
+                6) 如果显式错误码/错误描述已提供，禁止使用 body.contains(...) 或 response.body().contains(...) 断言整包字符串。
+                7) 显式导入所使用的 JUnit5 注解，并至少保留一个 @Test 方法。
+                %s
+                """.formatted(originalPrompt, attempt, validationError, targetedFixes);
     }
 
     private boolean hasText(String value) {
         return value != null && !value.trim().isEmpty();
+    }
+
+    private String buildTargetedRetryFixes(String validationError) {
+        String normalizedError = validationError == null ? "" : validationError;
+        StringBuilder builder = new StringBuilder();
+        if (normalizedError.contains("must assert HTTP status")) {
+            String requiredStatus = extractRequiredStatus(normalizedError);
+            builder.append("8) 下一次必须写出明确状态断言：`assertEquals(")
+                    .append(requiredStatus)
+                    .append(", response.statusCode())`。")
+                    .append('\n');
+        }
+        if (normalizedError.contains("whole-body contains")) {
+            builder.append("9) 下一次必须先把 `errorCode` / `errorDescription` 解析到变量，再对变量做 `assertEquals`；禁止任何 `body.contains(...)` 或 `response.body().contains(...)`。")
+                    .append('\n');
+        }
+        if (builder.isEmpty()) {
+            builder.append("8) 优先按显式期望生成可执行断言，不要保留模糊或整包字符串匹配。")
+                    .append('\n');
+        }
+        return builder.toString().trim();
+    }
+
+    private String extractRequiredStatus(String validationError) {
+        if (validationError == null) {
+            return "EXPECTED_STATUS";
+        }
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("(\\d{3})").matcher(validationError);
+        return matcher.find() ? matcher.group(1) : "EXPECTED_STATUS";
     }
 }

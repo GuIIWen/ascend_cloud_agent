@@ -46,8 +46,17 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
     private static final Pattern BODY_CONTAINS_ASSERTION = Pattern.compile(
             "assertTrue\\s*\\([^;]*\\.contains\\s*\\(",
             Pattern.DOTALL);
+    private static final Pattern WHOLE_BODY_CONTAINS_ASSERTION = Pattern.compile(
+            "(?:\\bbody\\b|\\bresponseBody\\b|\\bresponseText\\b|response\\s*\\.\\s*body\\s*\\(\\s*\\))\\s*\\.contains\\s*\\(",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern SUCCESS_OPERATION_FIELD = Pattern.compile(
             "operation_(?:id|status|type)");
+    private static final Pattern HTTP_CALL_PATTERN = Pattern.compile(
+            "(?:HttpClient\\s*\\.\\s*(?:newBuilder|newHttpClient)\\s*\\(|\\.send(?:Async)?\\s*\\(|OkHttpClient(?:\\.Builder)?\\b|\\.execute\\s*\\()",
+            Pattern.DOTALL);
+    private static final Pattern HTTP_TIMEOUT_PATTERN = Pattern.compile(
+            "\\.(?:timeout|connectTimeout|readTimeout|writeTimeout|callTimeout)\\s*\\(",
+            Pattern.DOTALL);
 
     private final KnowledgeBaseService knowledgeBaseService;
     private final LLMService llmService;
@@ -557,11 +566,13 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
             String expectedErrorCode,
             String expectedErrorDescription) {
         validatePathBinding(javaTestCode, primaryMetadata);
+        validateHttpTimeout(javaTestCode);
         validateExplicitExpectationCoverage(
                 javaTestCode,
                 expectedHttpStatus,
                 expectedErrorCode,
                 expectedErrorDescription);
+        validateErrorAssertionStyle(javaTestCode, expectedErrorCode, expectedErrorDescription);
         if (isNegativeExpectation(expectedHttpStatus, expectedErrorCode, expectedErrorDescription)
                 && SUCCESS_OPERATION_FIELD.matcher(javaTestCode).find()) {
             throw new IllegalStateException(
@@ -587,7 +598,11 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
             String expectedErrorDescription) {
         if (expectedHttpStatus != null && !hasStatusAssertion(javaTestCode, expectedHttpStatus)) {
             throw new IllegalStateException(
-                    "Generated testcase code must assert HTTP status " + expectedHttpStatus);
+                    "Generated testcase code must assert HTTP status "
+                            + expectedHttpStatus
+                            + " via assertEquals("
+                            + expectedHttpStatus
+                            + ", response.statusCode()) or equivalent");
         }
         if (hasText(expectedErrorCode) && !javaTestCode.contains(expectedErrorCode)) {
             throw new IllegalStateException(
@@ -596,6 +611,29 @@ public class TestcaseGenerationServiceImpl implements TestcaseGenerationService 
         if (hasText(expectedErrorDescription) && !javaTestCode.contains(expectedErrorDescription)) {
             throw new IllegalStateException(
                     "Generated testcase code must assert expected error description " + expectedErrorDescription);
+        }
+    }
+
+    private void validateHttpTimeout(String javaTestCode) {
+        if (!HTTP_CALL_PATTERN.matcher(javaTestCode).find()) {
+            return;
+        }
+        if (!HTTP_TIMEOUT_PATTERN.matcher(javaTestCode).find()) {
+            throw new IllegalStateException(
+                    "Generated testcase code must configure HTTP timeout for real HTTP calls");
+        }
+    }
+
+    private void validateErrorAssertionStyle(
+            String javaTestCode,
+            String expectedErrorCode,
+            String expectedErrorDescription) {
+        if (!hasText(expectedErrorCode) && !hasText(expectedErrorDescription)) {
+            return;
+        }
+        if (WHOLE_BODY_CONTAINS_ASSERTION.matcher(javaTestCode).find()) {
+            throw new IllegalStateException(
+                    "Generated testcase code must not assert explicit error code/description via whole-body contains; parse errorCode/errorDescription into variables and assert those variables instead");
         }
     }
 

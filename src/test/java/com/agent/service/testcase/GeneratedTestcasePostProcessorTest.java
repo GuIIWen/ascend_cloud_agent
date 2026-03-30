@@ -28,8 +28,11 @@ class GeneratedTestcasePostProcessorTest {
 
         String normalized = processor.process(generated);
 
-        assertTrue(normalized.contains("requiredConfig(\"HUAWEICLOUD_PROJECT_ID\", \"hwcloud.project.id\")"));
-        assertTrue(normalized.contains("requiredConfig(\"HUAWEICLOUD_AUTH_TOKEN\", \"hwcloud.auth.token\")"));
+        assertTrue(normalized.contains("@BeforeAll"));
+        assertTrue(normalized.contains("private static String PROJECT_ID;"));
+        assertTrue(normalized.contains("private static String AUTH_TOKEN;"));
+        assertTrue(normalized.contains("PROJECT_ID = requiredConfig(\"HUAWEICLOUD_PROJECT_ID\", \"hwcloud.project.id\")"));
+        assertTrue(normalized.contains("AUTH_TOKEN = requiredConfig(\"HUAWEICLOUD_AUTH_TOKEN\", \"hwcloud.auth.token\")"));
         assertTrue(normalized.contains("Assumptions.assumeTrue"));
         assertFalse(normalized.toLowerCase().contains("placeholder"));
     }
@@ -51,8 +54,11 @@ class GeneratedTestcasePostProcessorTest {
 
         String normalized = processor.process(generated);
 
-        assertTrue(normalized.contains("requiredConfig(\"HUAWEICLOUD_DEV_SERVER_ID\", \"hwcloud.dev-server.id\")"));
-        assertTrue(normalized.contains("requiredConfig(\"HUAWEICLOUD_VOLUME_ID\", \"hwcloud.volume.id\")"));
+        assertTrue(normalized.contains("private static String DEV_SERVER_ID;"));
+        assertTrue(normalized.contains("private static String VOLUME_ID;"));
+        assertTrue(normalized.contains("DEV_SERVER_ID = requiredConfig(\"HUAWEICLOUD_DEV_SERVER_ID\", \"hwcloud.dev-server.id\")"));
+        assertTrue(normalized.contains("VOLUME_ID = requiredConfig(\"HUAWEICLOUD_VOLUME_ID\", \"hwcloud.volume.id\")"));
+        assertTrue(normalized.contains("@BeforeAll"));
         assertTrue(normalized.contains("private static String requiredConfig("));
     }
 
@@ -75,6 +81,9 @@ class GeneratedTestcasePostProcessorTest {
         assertTrue(normalized.contains("private static String requiredConfig("));
         assertTrue(normalized.contains("Assumptions.assumeTrue"));
         assertTrue(normalized.contains("value = value.replace(\"\\r\", \"\").replace(\"\\n\", \"\").trim();"));
+        assertTrue(normalized.contains("@BeforeAll"));
+        assertTrue(normalized.contains("DEV_SERVER_ID = requiredConfig(\"HUAWEICLOUD_DEV_SERVER_ID\", \"hwcloud.dev-server.id\")"));
+        assertFalse(normalized.contains("private static final String DEV_SERVER_ID = requiredConfig("));
     }
 
     @Test
@@ -128,6 +137,35 @@ class GeneratedTestcasePostProcessorTest {
     }
 
     @Test
+    void addsJUnit5ImportsWhenShortAnnotationsArePresentWithoutImports() {
+        String generated = """
+                public class DetachVolumeTest {
+                    private static String AUTH_TOKEN;
+
+                    @BeforeAll
+                    static void loadConfig() {
+                        AUTH_TOKEN = requiredConfig("HUAWEICLOUD_AUTH_TOKEN", "hwcloud.auth.token");
+                    }
+
+                    @Test
+                    void detach() {
+                    }
+
+                    private static String requiredConfig(String envKey, String propertyKey) {
+                        return "";
+                    }
+                }
+                """;
+
+        String normalized = processor.process(generated);
+
+        assertTrue(normalized.contains("import org.junit.jupiter.api.BeforeAll;"));
+        assertTrue(normalized.contains("import org.junit.jupiter.api.Test;"));
+        assertTrue(normalized.contains("@BeforeAll"));
+        assertTrue(normalized.contains("@Test"));
+    }
+
+    @Test
     void injectedRequiredConfigSanitizesAuthTokenWithCrLf() {
         String generated = """
                 import org.junit.jupiter.api.Test;
@@ -165,9 +203,10 @@ class GeneratedTestcasePostProcessorTest {
 
         String normalized = processor.process(generated);
 
-        assertTrue(normalized.contains("requiredConfig(\"HUAWEICLOUD_AUTH_TOKEN\", \"hwcloud.auth.token\")"));
-        assertTrue(normalized.contains("requiredConfig(\"HUAWEICLOUD_PROJECT_ID\", \"hwcloud.project.id\")"));
-        assertTrue(normalized.contains("requiredConfig(\"HUAWEICLOUD_BASE_URL\", \"hwcloud.base.url\")"));
+        assertTrue(normalized.contains("ENV_TOKEN = requiredConfig(\"HUAWEICLOUD_AUTH_TOKEN\", \"hwcloud.auth.token\")"));
+        assertTrue(normalized.contains("ENV_PROJECT = requiredConfig(\"HUAWEICLOUD_PROJECT_ID\", \"hwcloud.project.id\")"));
+        assertTrue(normalized.contains("ENV_BASE = requiredConfig(\"HUAWEICLOUD_BASE_URL\", \"hwcloud.base.url\")"));
+        assertTrue(normalized.contains("@BeforeAll"));
         assertFalse(normalized.contains("System.getenv(\"HUAWEICLOUD_AUTH_TOKEN\")"));
         assertFalse(normalized.contains("System.getProperty(\"hwcloud.project.id\")"));
     }
@@ -210,6 +249,58 @@ class GeneratedTestcasePostProcessorTest {
         assertTrue(normalized.contains("requiredConfig(\"HUAWEICLOUD_VOLUME_ID\", \"hwcloud.volume.id\")"));
         assertFalse(normalized.contains("System.getenv(\"HUAWEICLOUD_AUTH_TOKEN\")"));
         assertFalse(normalized.contains("lite-123"));
+    }
+
+    @Test
+    void flattensRedundantOptionalRequiredConfigFallback() {
+        String generated = """
+                import java.util.Optional;
+                import org.junit.jupiter.api.Test;
+
+                public class AuthHeaderTest {
+                    @Test
+                    void sendsHeader() {
+                        String token = Optional.ofNullable(requiredConfig("HUAWEICLOUD_AUTH_TOKEN", "hwcloud.auth.token"))
+                                .orElse(requiredConfig("HUAWEICLOUD_AUTH_TOKEN", "hwcloud.auth.token"));
+                        System.out.println(token);
+                    }
+
+                    private static String requiredConfig(String envKey, String propertyKey) {
+                        return "";
+                    }
+                }
+                """;
+
+        String normalized = processor.process(generated);
+
+        assertTrue(normalized.contains("String token = requiredConfig(\"HUAWEICLOUD_AUTH_TOKEN\", \"hwcloud.auth.token\");"));
+        assertFalse(normalized.contains("Optional.ofNullable"));
+        assertFalse(normalized.contains(".orElse("));
+    }
+
+    @Test
+    void rejectsUnsupportedOptionalRequiredConfigFallbackMismatch() {
+        String generated = """
+                import java.util.Optional;
+                import org.junit.jupiter.api.Test;
+
+                public class AuthHeaderTest {
+                    @Test
+                    void sendsHeader() {
+                        String token = Optional.ofNullable(requiredConfig("HUAWEICLOUD_AUTH_TOKEN", "hwcloud.auth.token"))
+                                .orElse(requiredConfig("HUAWEICLOUD_PROJECT_ID", "hwcloud.project.id"));
+                        System.out.println(token);
+                    }
+
+                    private static String requiredConfig(String envKey, String propertyKey) {
+                        return "";
+                    }
+                }
+                """;
+
+        IllegalStateException error = assertThrows(IllegalStateException.class, () -> processor.process(generated));
+
+        assertTrue(error.getMessage().contains("unsupported Optional fallback around requiredConfig"));
     }
 
     @Test
@@ -289,6 +380,21 @@ class GeneratedTestcasePostProcessorTest {
         String generated = """
                 public class PlainJavaClass {
                     void run() {
+                    }
+                }
+                """;
+
+        IllegalStateException error = assertThrows(IllegalStateException.class, () -> processor.process(generated));
+
+        assertEquals("Generated testcase code must be a JUnit5 test class", error.getMessage());
+    }
+
+    @Test
+    void rejectsClassWithoutTestMethodEvenIfBeforeAllAnnotationExists() {
+        String generated = """
+                public class PlainJavaClass {
+                    @BeforeAll
+                    static void setup() {
                     }
                 }
                 """;

@@ -7,6 +7,7 @@ import com.github.javaparser.ast.ImportDeclaration;
 import com.github.javaparser.ast.Modifier;
 import com.github.javaparser.ast.NodeList;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.FieldDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import com.github.javaparser.ast.body.VariableDeclarator;
@@ -17,6 +18,7 @@ import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -28,6 +30,22 @@ import java.util.regex.Pattern;
  * 对LLM生成的测试用例做最小可交付收口。
  */
 class GeneratedTestcasePostProcessor {
+    private static final Map<String, String> JUNIT5_ANNOTATION_IMPORTS = Map.of(
+            "Test", "org.junit.jupiter.api.Test",
+            "BeforeAll", "org.junit.jupiter.api.BeforeAll",
+            "BeforeEach", "org.junit.jupiter.api.BeforeEach",
+            "AfterAll", "org.junit.jupiter.api.AfterAll",
+            "AfterEach", "org.junit.jupiter.api.AfterEach",
+            "ParameterizedTest", "org.junit.jupiter.params.ParameterizedTest",
+            "RepeatedTest", "org.junit.jupiter.api.RepeatedTest",
+            "TestFactory", "org.junit.jupiter.api.TestFactory",
+            "TestTemplate", "org.junit.jupiter.api.TestTemplate");
+    private static final List<String> JUNIT5_TEST_METHOD_ANNOTATIONS = List.of(
+            "Test",
+            "ParameterizedTest",
+            "RepeatedTest",
+            "TestFactory",
+            "TestTemplate");
 
     private static final Pattern TODO_PATTERN = Pattern.compile("(?i)\\bTODO\\b");
     private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile(
@@ -62,14 +80,21 @@ class GeneratedTestcasePostProcessor {
         ClassOrInterfaceDeclaration testClass = requireSinglePublicClass(compilationUnit);
         ensureJUnit5TestClass(compilationUnit, testClass);
 
-        boolean helperRequired = rewriteRequiredConfigFields(testClass);
-        helperRequired = rewriteDirectConfigLookups(testClass) || helperRequired;
+        boolean helperRequired = rewriteDirectConfigLookups(testClass);
+        helperRequired = flattenRedundantRequiredConfigFallbacks(testClass) || helperRequired;
+        FieldRewriteResult fieldRewriteResult = rewriteRequiredConfigFields(testClass);
+        helperRequired = fieldRewriteResult.helperRequired() || helperRequired;
+        if (!fieldRewriteResult.beforeAllBindings().isEmpty()) {
+            ensureBeforeAllImport(compilationUnit);
+            ensureBeforeAllConfigSetup(testClass, fieldRewriteResult.beforeAllBindings());
+        }
         helperRequired = hasRequiredConfigMethod(testClass) || helperRequired;
         if (helperRequired) {
             ensureAssumptionsImport(compilationUnit);
             ensureRequiredConfigMethod(testClass);
         }
         ensureNoDirectConfigLookup(testClass);
+        ensureNoRequiredConfigFieldInitializer(testClass);
 
         String normalized = compilationUnit.toString();
         if (TODO_PATTERN.matcher(normalized).find()) {
@@ -104,63 +129,57 @@ class GeneratedTestcasePostProcessor {
     }
 
     private void ensureJUnit5TestClass(CompilationUnit compilationUnit, ClassOrInterfaceDeclaration testClass) {
-        boolean importedJUnit5 = compilationUnit.getImports().stream()
-                .map(ImportDeclaration::getNameAsString)
-                .anyMatch(name -> name.startsWith("org.junit.jupiter"));
-        boolean hasTestMethod = testClass.getMethods().stream().anyMatch(this::hasJUnit5TestAnnotation);
-        if (!importedJUnit5 || !hasTestMethod) {
+        boolean hasTestMethod = testClass.getMethods().stream()
+                .anyMatch(method -> hasJUnit5TestAnnotation(compilationUnit, method));
+        if (!hasTestMethod) {
             throw new IllegalStateException("Generated testcase code must be a JUnit5 test class");
         }
+        ensureJUnit5AnnotationImports(compilationUnit, testClass);
     }
 
-    private boolean hasJUnit5TestAnnotation(MethodDeclaration method) {
+    private boolean hasJUnit5TestAnnotation(CompilationUnit compilationUnit, MethodDeclaration method) {
         return method.getAnnotations().stream()
-                .map(annotation -> annotation.getName().getIdentifier())
-                .anyMatch(name -> List.of("Test", "ParameterizedTest", "RepeatedTest", "TestFactory", "TestTemplate")
-                        .contains(name));
+                .anyMatch(annotation -> isJUnit5AnnotationReference(
+                        compilationUnit,
+                        annotation.getNameAsString(),
+                        JUNIT5_TEST_METHOD_ANNOTATIONS));
     }
 
-    private boolean rewriteRequiredConfigFields(ClassOrInterfaceDeclaration testClass) {
+    private FieldRewriteResult rewriteRequiredConfigFields(ClassOrInterfaceDeclaration testClass) {
         boolean helperRequired = false;
-        Map<String, ConfigBinding> boundVariables = new LinkedHashMap<>();
-        for (VariableDeclarator variable : testClass.findAll(VariableDeclarator.class)) {
-            Optional<Expression> initializer = variable.getInitializer();
-            if (initializer.isPresent()) {
-                ConfigBinding bindingFromLookup = resolveBinding(initializer.get());
-                if (bindingFromLookup != null) {
-                    variable.setInitializer(requiredConfigCall(bindingFromLookup.envKey(), bindingFromLookup.propertyKey()));
-                    helperRequired = true;
+        Map<String, ConfigBinding> boundFields = new LinkedHashMap<>();
+        Map<String, ConfigBinding> beforeAllBindings = new LinkedHashMap<>();
+        for (FieldDeclaration fieldDeclaration : testClass.getFields()) {
+            for (VariableDeclarator variable : fieldDeclaration.getVariables()) {
+                Optional<Expression> initializer = variable.getInitializer();
+                ConfigBinding binding = resolveFieldBinding(variable);
+                if (binding == null) {
+                    if (initializer.isPresent() && containsRequiredConfigCall(initializer.get())) {
+                        throw new IllegalStateException(
+                                "Generated testcase code must not call requiredConfig during field initialization for "
+                                        + variable.getNameAsString());
+                    }
                     continue;
                 }
-            }
-            ConfigBinding binding = resolveBinding(variable.getNameAsString());
-            if (binding == null) {
-                continue;
-            }
-            if (!"String".equals(variable.getType().asString())) {
-                throw new IllegalStateException(
-                        "Generated testcase code must declare " + variable.getNameAsString() + " as String");
-            }
-            boundVariables.put(variable.getNameAsString(), binding);
-
-            if (initializer.isPresent() && !isRequiredConfigCall(initializer.get(), binding)) {
-                if (initializer.get() instanceof StringLiteralExpr stringLiteralExpr
-                        && looksLikeFabricatedResourceLiteral(stringLiteralExpr.asString())) {
-                    throw new IllegalStateException(
-                            "Generated testcase code contains hard-coded resource literal for " + variable.getNameAsString());
+                validateBoundVariableType(variable);
+                boundFields.put(variable.getNameAsString(), binding);
+                if (initializer.isPresent()) {
+                    ensureNoFabricatedResourceLiteral(variable.getNameAsString(), initializer.get());
+                    normalizeFieldDeclarationForBeforeAll(fieldDeclaration);
+                    variable.removeInitializer();
+                    beforeAllBindings.put(variable.getNameAsString(), binding);
+                    helperRequired = true;
                 }
-                variable.setInitializer(requiredConfigCall(binding.envKey(), binding.propertyKey()));
-                helperRequired = true;
             }
         }
 
         Map<String, Boolean> assignedViaRequiredConfig = new LinkedHashMap<>();
-        for (String variableName : boundVariables.keySet()) {
+        for (String variableName : boundFields.keySet()) {
             assignedViaRequiredConfig.put(variableName, false);
         }
         for (AssignExpr assignExpr : testClass.findAll(AssignExpr.class)) {
             String variableName = extractAssignedVariableName(assignExpr);
-            ConfigBinding binding = resolveBinding(variableName);
+            ConfigBinding binding = boundFields.get(variableName);
             if (binding == null) {
                 continue;
             }
@@ -172,33 +191,42 @@ class GeneratedTestcasePostProcessor {
         }
 
         for (VariableDeclarator variable : testClass.findAll(VariableDeclarator.class)) {
-            ConfigBinding binding = resolveBinding(variable.getNameAsString());
+            if (isFieldVariable(variable)) {
+                ConfigBinding binding = boundFields.get(variable.getNameAsString());
+                if (binding == null) {
+                    continue;
+                }
+                validateBoundVariableType(variable);
+                if (variable.getInitializer().isPresent()) {
+                    throw new IllegalStateException(
+                            "Generated testcase code must not call requiredConfig during field initialization for "
+                                    + variable.getNameAsString());
+                }
+                if (!Boolean.TRUE.equals(assignedViaRequiredConfig.get(variable.getNameAsString()))) {
+                    beforeAllBindings.putIfAbsent(variable.getNameAsString(), binding);
+                    helperRequired = true;
+                }
+                continue;
+            }
+
+            ConfigBinding binding = resolveLocalBinding(variable);
             if (binding == null) {
                 continue;
             }
+            validateBoundVariableType(variable);
             Optional<Expression> initializer = variable.getInitializer();
             if (initializer.isPresent()) {
-                if (isRequiredConfigCall(initializer.get(), binding)) {
-                    helperRequired = true;
-                    assignedViaRequiredConfig.put(variable.getNameAsString(), true);
-                    continue;
+                ensureNoFabricatedResourceLiteral(variable.getNameAsString(), initializer.get());
+                if (!isRequiredConfigCall(initializer.get(), binding)) {
+                    variable.setInitializer(requiredConfigCall(binding.envKey(), binding.propertyKey()));
                 }
-                if (initializer.get() instanceof StringLiteralExpr stringLiteralExpr
-                        && looksLikeFabricatedResourceLiteral(stringLiteralExpr.asString())) {
-                    throw new IllegalStateException(
-                            "Generated testcase code contains hard-coded resource literal for " + variable.getNameAsString());
-                }
-                throw new IllegalStateException(
-                        "Generated testcase code must load " + variable.getNameAsString() + " via requiredConfig");
-            }
-            if (Boolean.TRUE.equals(assignedViaRequiredConfig.get(variable.getNameAsString()))) {
                 helperRequired = true;
                 continue;
             }
             throw new IllegalStateException(
                     "Generated testcase code must initialize " + variable.getNameAsString() + " via requiredConfig");
         }
-        return helperRequired;
+        return new FieldRewriteResult(helperRequired, beforeAllBindings);
     }
 
     private void ensureNoDirectConfigLookup(ClassOrInterfaceDeclaration testClass) {
@@ -216,11 +244,27 @@ class GeneratedTestcasePostProcessor {
 
     private boolean rewriteDirectConfigLookups(ClassOrInterfaceDeclaration testClass) {
         boolean rewritten = false;
-        for (MethodCallExpr methodCallExpr : testClass.findAll(MethodCallExpr.class)) {
+        for (MethodCallExpr methodCallExpr : new ArrayList<>(testClass.findAll(MethodCallExpr.class))) {
             if (isInsideRequiredConfigMethod(methodCallExpr)) {
                 continue;
             }
             ConfigBinding binding = resolveBinding(methodCallExpr);
+            if (binding == null) {
+                continue;
+            }
+            methodCallExpr.replace(requiredConfigCall(binding.envKey(), binding.propertyKey()));
+            rewritten = true;
+        }
+        return rewritten;
+    }
+
+    private boolean flattenRedundantRequiredConfigFallbacks(ClassOrInterfaceDeclaration testClass) {
+        boolean rewritten = false;
+        for (MethodCallExpr methodCallExpr : new ArrayList<>(testClass.findAll(MethodCallExpr.class))) {
+            if (isInsideRequiredConfigMethod(methodCallExpr)) {
+                continue;
+            }
+            ConfigBinding binding = resolveRedundantRequiredConfigFallbackBinding(methodCallExpr, true);
             if (binding == null) {
                 continue;
             }
@@ -249,6 +293,7 @@ class GeneratedTestcasePostProcessor {
     }
 
     private ConfigBinding resolveBinding(Expression expression) {
+        expression = unwrapExpression(expression);
         if (!(expression instanceof MethodCallExpr methodCallExpr)) {
             return null;
         }
@@ -289,7 +334,110 @@ class GeneratedTestcasePostProcessor {
                 .addArgument(new StringLiteralExpr(propertyKey));
     }
 
+    private ConfigBinding resolveFieldBinding(VariableDeclarator variable) {
+        ConfigBinding bindingByName = resolveBinding(variable.getNameAsString());
+        ConfigBinding bindingByInitializer = variable.getInitializer()
+                .map(this::resolveConfigExpressionBinding)
+                .orElse(null);
+        if (bindingByName != null && bindingByInitializer != null && !bindingByName.equals(bindingByInitializer)) {
+            throw new IllegalStateException(
+                    "Generated testcase code contains conflicting config binding for field " + variable.getNameAsString());
+        }
+        return bindingByInitializer != null ? bindingByInitializer : bindingByName;
+    }
+
+    private ConfigBinding resolveLocalBinding(VariableDeclarator variable) {
+        ConfigBinding bindingByName = resolveBinding(variable.getNameAsString());
+        ConfigBinding bindingByInitializer = variable.getInitializer()
+                .map(this::resolveConfigExpressionBinding)
+                .orElse(null);
+        if (bindingByName != null && bindingByInitializer != null && !bindingByName.equals(bindingByInitializer)) {
+            throw new IllegalStateException(
+                    "Generated testcase code contains conflicting config binding for variable " + variable.getNameAsString());
+        }
+        return bindingByInitializer != null ? bindingByInitializer : bindingByName;
+    }
+
+    private ConfigBinding resolveConfigExpressionBinding(Expression expression) {
+        expression = unwrapExpression(expression);
+        ConfigBinding directBinding = resolveBinding(expression);
+        if (directBinding != null) {
+            return directBinding;
+        }
+        ConfigBinding requiredConfigBinding = resolveRequiredConfigBinding(expression);
+        if (requiredConfigBinding != null) {
+            return requiredConfigBinding;
+        }
+        return resolveRedundantRequiredConfigFallbackBinding(expression, false);
+    }
+
+    private ConfigBinding resolveRequiredConfigBinding(Expression expression) {
+        expression = unwrapExpression(expression);
+        if (!(expression instanceof MethodCallExpr methodCallExpr)) {
+            return null;
+        }
+        if (!"requiredConfig".equals(methodCallExpr.getNameAsString()) || methodCallExpr.getArguments().size() != 2) {
+            return null;
+        }
+        if (!methodCallExpr.getArgument(0).isStringLiteralExpr() || !methodCallExpr.getArgument(1).isStringLiteralExpr()) {
+            return null;
+        }
+        String envKey = methodCallExpr.getArgument(0).asStringLiteralExpr().asString();
+        String propertyKey = methodCallExpr.getArgument(1).asStringLiteralExpr().asString();
+        ConfigBinding bindingByEnv = resolveBindingByEnvKey(envKey);
+        ConfigBinding bindingByProperty = resolveBindingByPropertyKey(propertyKey);
+        if (bindingByEnv == null || !bindingByEnv.equals(bindingByProperty)) {
+            return null;
+        }
+        return bindingByEnv;
+    }
+
+    private ConfigBinding resolveRedundantRequiredConfigFallbackBinding(Expression expression, boolean failOnMismatch) {
+        expression = unwrapExpression(expression);
+        if (!(expression instanceof MethodCallExpr methodCallExpr)) {
+            return null;
+        }
+        if (!"orElse".equals(methodCallExpr.getNameAsString()) || methodCallExpr.getArguments().size() != 1) {
+            return null;
+        }
+        if (methodCallExpr.getScope().isEmpty()) {
+            return null;
+        }
+        Expression scope = unwrapExpression(methodCallExpr.getScope().orElseThrow());
+        if (!(scope instanceof MethodCallExpr optionalOfNullable)) {
+            return null;
+        }
+        if (!"ofNullable".equals(optionalOfNullable.getNameAsString())
+                || optionalOfNullable.getArguments().size() != 1
+                || optionalOfNullable.getScope().isEmpty()
+                || !"Optional".equals(optionalOfNullable.getScope().orElseThrow().toString())) {
+            return null;
+        }
+        ConfigBinding primaryBinding = resolveConfigOperandBinding(optionalOfNullable.getArgument(0));
+        ConfigBinding fallbackBinding = resolveConfigOperandBinding(methodCallExpr.getArgument(0));
+        if (primaryBinding == null && fallbackBinding == null) {
+            return null;
+        }
+        if (primaryBinding == null || fallbackBinding == null || !primaryBinding.equals(fallbackBinding)) {
+            if (failOnMismatch) {
+                throw new IllegalStateException(
+                        "Generated testcase code contains unsupported Optional fallback around requiredConfig");
+            }
+            return null;
+        }
+        return primaryBinding;
+    }
+
+    private ConfigBinding resolveConfigOperandBinding(Expression expression) {
+        ConfigBinding binding = resolveRequiredConfigBinding(expression);
+        if (binding != null) {
+            return binding;
+        }
+        return resolveBinding(expression);
+    }
+
     private boolean isRequiredConfigCall(Expression expr, ConfigBinding binding) {
+        expr = unwrapExpression(expr);
         if (!(expr instanceof MethodCallExpr methodCallExpr)) {
             return false;
         }
@@ -315,6 +463,42 @@ class GeneratedTestcasePostProcessor {
         return "";
     }
 
+    private boolean isFieldVariable(VariableDeclarator variable) {
+        return variable.findAncestor(FieldDeclaration.class).isPresent();
+    }
+
+    private void validateBoundVariableType(VariableDeclarator variable) {
+        if (!"String".equals(variable.getType().asString())) {
+            throw new IllegalStateException(
+                    "Generated testcase code must declare " + variable.getNameAsString() + " as String");
+        }
+    }
+
+    private void ensureNoFabricatedResourceLiteral(String variableName, Expression initializer) {
+        initializer = unwrapExpression(initializer);
+        if (initializer instanceof StringLiteralExpr stringLiteralExpr
+                && looksLikeFabricatedResourceLiteral(stringLiteralExpr.asString())) {
+            throw new IllegalStateException(
+                    "Generated testcase code contains hard-coded resource literal for " + variableName);
+        }
+    }
+
+    private void normalizeFieldDeclarationForBeforeAll(FieldDeclaration fieldDeclaration) {
+        fieldDeclaration.removeModifier(Modifier.Keyword.FINAL);
+        if (!fieldDeclaration.isStatic()) {
+            fieldDeclaration.addModifier(Modifier.Keyword.STATIC);
+        }
+    }
+
+    private boolean containsRequiredConfigCall(Expression expression) {
+        expression = unwrapExpression(expression);
+        if (resolveRequiredConfigBinding(expression) != null) {
+            return true;
+        }
+        return expression.findAll(MethodCallExpr.class).stream()
+                .anyMatch(methodCallExpr -> "requiredConfig".equals(methodCallExpr.getNameAsString()));
+    }
+
     private boolean looksLikePlaceholder(String value) {
         String normalized = value == null ? "" : value.toLowerCase(Locale.ROOT);
         return normalized.contains("placeholder")
@@ -330,6 +514,94 @@ class GeneratedTestcasePostProcessor {
         if (!alreadyImported) {
             compilationUnit.addImport("org.junit.jupiter.api.Assumptions");
         }
+    }
+
+    private void ensureJUnit5AnnotationImports(
+            CompilationUnit compilationUnit,
+            ClassOrInterfaceDeclaration testClass) {
+        for (MethodDeclaration method : testClass.getMethods()) {
+            method.getAnnotations().forEach(annotation -> ensureJUnit5AnnotationImport(
+                    compilationUnit,
+                    annotation.getNameAsString()));
+        }
+    }
+
+    private void ensureJUnit5AnnotationImport(CompilationUnit compilationUnit, String annotationName) {
+        String simpleName = extractSimpleAnnotationName(annotationName);
+        String importName = JUNIT5_ANNOTATION_IMPORTS.get(simpleName);
+        if (importName == null || annotationName.contains(".") || hasImport(compilationUnit, importName)) {
+            return;
+        }
+        if (hasConflictingImport(compilationUnit, simpleName)) {
+            return;
+        }
+        compilationUnit.addImport(importName);
+    }
+
+    private void ensureBeforeAllImport(CompilationUnit compilationUnit) {
+        boolean alreadyImported = compilationUnit.getImports().stream()
+                .map(ImportDeclaration::getNameAsString)
+                .anyMatch("org.junit.jupiter.api.BeforeAll"::equals);
+        if (!alreadyImported) {
+            compilationUnit.addImport("org.junit.jupiter.api.BeforeAll");
+        }
+    }
+
+    private void ensureBeforeAllConfigSetup(
+            ClassOrInterfaceDeclaration testClass,
+            Map<String, ConfigBinding> beforeAllBindings) {
+        MethodDeclaration method = testClass.getMethods().stream()
+                .filter(this::hasBeforeAllAnnotation)
+                .findFirst()
+                .orElseGet(() -> {
+                    MethodDeclaration created =
+                            testClass.addMethod("loadRuntimeConfig", Modifier.Keyword.PRIVATE, Modifier.Keyword.STATIC);
+                    created.setType("void");
+                    created.addAnnotation("BeforeAll");
+                    return created;
+                });
+        if (!hasBeforeAllAnnotation(method)) {
+            method.addAnnotation("BeforeAll");
+        }
+        if (!method.isStatic()) {
+            method.addModifier(Modifier.Keyword.STATIC);
+        }
+        method.setType("void");
+        var body = method.getBody().orElseGet(method::createBody);
+        Map<String, Boolean> configuredInMethod = new LinkedHashMap<>();
+        for (String variableName : beforeAllBindings.keySet()) {
+            configuredInMethod.put(variableName, false);
+        }
+        for (AssignExpr assignExpr : method.findAll(AssignExpr.class)) {
+            String variableName = extractAssignedVariableName(assignExpr);
+            ConfigBinding binding = beforeAllBindings.get(variableName);
+            if (binding == null) {
+                continue;
+            }
+            if (!isRequiredConfigCall(assignExpr.getValue(), binding)) {
+                assignExpr.setValue(requiredConfigCall(binding.envKey(), binding.propertyKey()));
+            }
+            configuredInMethod.put(variableName, true);
+        }
+        for (Map.Entry<String, ConfigBinding> entry : beforeAllBindings.entrySet()) {
+            if (Boolean.TRUE.equals(configuredInMethod.get(entry.getKey()))) {
+                continue;
+            }
+            body.addStatement(entry.getKey()
+                    + " = requiredConfig(\""
+                    + entry.getValue().envKey()
+                    + "\", \""
+                    + entry.getValue().propertyKey()
+                    + "\");");
+        }
+    }
+
+    private boolean hasBeforeAllAnnotation(MethodDeclaration method) {
+        return method.getAnnotations().stream()
+                .anyMatch(annotation -> isJUnit5AnnotationReference(
+                        method.findCompilationUnit().orElse(null),
+                        annotation.getNameAsString(),
+                        List.of("BeforeAll")));
     }
 
     private void ensureRequiredConfigMethod(ClassOrInterfaceDeclaration testClass) {
@@ -359,6 +631,73 @@ class GeneratedTestcasePostProcessor {
     private boolean hasRequiredConfigMethod(ClassOrInterfaceDeclaration testClass) {
         return testClass.getMethodsByName("requiredConfig").stream()
                 .anyMatch(method -> method.getParameters().size() == 2);
+    }
+
+    private void ensureNoRequiredConfigFieldInitializer(ClassOrInterfaceDeclaration testClass) {
+        for (FieldDeclaration fieldDeclaration : testClass.getFields()) {
+            for (VariableDeclarator variable : fieldDeclaration.getVariables()) {
+                if (variable.getInitializer().isPresent()
+                        && containsRequiredConfigCall(variable.getInitializer().orElseThrow())) {
+                    throw new IllegalStateException(
+                            "Generated testcase code must not call requiredConfig during field initialization for "
+                                    + variable.getNameAsString());
+                }
+            }
+        }
+    }
+
+    private Expression unwrapExpression(Expression expression) {
+        Expression current = expression;
+        while (current != null && current.isEnclosedExpr()) {
+            current = current.asEnclosedExpr().getInner();
+        }
+        return current;
+    }
+
+    private boolean isJUnit5AnnotationReference(
+            CompilationUnit compilationUnit,
+            String annotationName,
+            List<String> expectedSimpleNames) {
+        String simpleName = extractSimpleAnnotationName(annotationName);
+        if (!expectedSimpleNames.contains(simpleName)) {
+            return false;
+        }
+        if (annotationName.startsWith("org.junit.jupiter.")) {
+            return true;
+        }
+        if (compilationUnit == null) {
+            return !annotationName.contains(".");
+        }
+        String expectedImport = JUNIT5_ANNOTATION_IMPORTS.get(simpleName);
+        if (expectedImport != null && hasImport(compilationUnit, expectedImport)) {
+            return true;
+        }
+        if (hasConflictingImport(compilationUnit, simpleName)) {
+            return false;
+        }
+        return !annotationName.contains(".");
+    }
+
+    private boolean hasImport(CompilationUnit compilationUnit, String importName) {
+        return compilationUnit != null && compilationUnit.getImports().stream()
+                .map(ImportDeclaration::getNameAsString)
+                .anyMatch(importName::equals);
+    }
+
+    private boolean hasConflictingImport(CompilationUnit compilationUnit, String simpleName) {
+        return compilationUnit != null && compilationUnit.getImports().stream()
+                .filter(importDeclaration -> !importDeclaration.isAsterisk())
+                .map(ImportDeclaration::getNameAsString)
+                .anyMatch(importName -> importName.endsWith("." + simpleName)
+                        && !importName.equals(JUNIT5_ANNOTATION_IMPORTS.get(simpleName)));
+    }
+
+    private String extractSimpleAnnotationName(String annotationName) {
+        int separator = annotationName.lastIndexOf('.');
+        return separator >= 0 ? annotationName.substring(separator + 1) : annotationName;
+    }
+
+    private record FieldRewriteResult(boolean helperRequired, Map<String, ConfigBinding> beforeAllBindings) {
     }
 
     private record ConfigBinding(String envKey, String propertyKey) {

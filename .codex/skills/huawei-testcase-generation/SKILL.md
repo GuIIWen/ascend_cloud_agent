@@ -61,6 +61,13 @@ Generated tests should read runtime values from env vars or system properties:
 - The generated testcase may only call the API that is backed by the selected citation/context.
 - If explicit truth is not provided and the context does not contain a concrete truth, do not fabricate exact status code, error code, or error description assertions.
 - Reject code containing `TODO`, placeholder tokens, or fabricated required resource literals such as `lite-123` or `system`.
+- Canonical skeleton:
+  - If class-level runtime config fields are declared, declare them without initializers and load them in `@BeforeAll`.
+  - Do not call `requiredConfig(...)`, `System.getenv(...)`, `System.getProperty(...)`, or `Optional.ofNullable(...).orElse(...)` in field initializers.
+  - All runtime config lookup must flow through `requiredConfig(envKey, propertyKey)`.
+  - Do not emit `Optional.ofNullable(requiredConfig(...)).orElse(requiredConfig(...))`; flatten to a single `requiredConfig(...)`.
+  - Any real HTTP client/request call must carry an explicit timeout.
+  - When `expectedErrorCode` or `expectedErrorDescription` is explicit, assert concrete parsed fields or variables; do not use whole-body `body.contains(...)` assertions.
 
 ## Standard Flow
 
@@ -98,6 +105,8 @@ Generated tests should read runtime values from env vars or system properties:
 - Reject code that does not declare exactly one `public class`.
 - Confirm explicit expectations appear in assertions when explicitly provided.
 - When explicit expectations are absent, confirm the code does not invent exact error/status truth not present in context.
+- Reject code that performs a real HTTP call without explicit timeout configuration.
+- Reject code that asserts explicit error code/description via whole-body `body.contains(...)` / `response.body().contains(...)`.
 
 8. Compile with Java 21.
 - Extract class name from generated code.
@@ -112,6 +121,8 @@ Generated tests should read runtime values from env vars or system properties:
 - If KB hit is weak (missing concrete API metadata), treat it as a miss and require `referenceUrl`.
 - If explicit expectations are not provided and context has no clear status/error semantics:
   - do not fabricate concrete status code, error code, or error description.
+- If code reads runtime config during field initialization and the binding cannot be safely rewritten into `@BeforeAll` + `requiredConfig(...)`:
+  - fail closed and regenerate instead of returning risky code.
 - If the cited API and real truth show a known unsupported path, preserve that negative truth. Example:
   - BMS Lite Server detach-volume currently validates to `HTTP 400 / ModelArts.7000 / does not support detach volume device`
 
