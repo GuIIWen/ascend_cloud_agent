@@ -7,6 +7,7 @@ public class TestcaseGenerateRequest {
     private Integer expectedHttpStatus;
     private String expectedErrorCode;
     private String expectedErrorDescription;
+    private TestcaseExecutionOptionsRequest execution;
 
     public String getRequirement() {
         return requirement;
@@ -46,5 +47,13 @@ public class TestcaseGenerateRequest {
 
     public void setExpectedErrorDescription(String expectedErrorDescription) {
         this.expectedErrorDescription = expectedErrorDescription;
+    }
+
+    public TestcaseExecutionOptionsRequest getExecution() {
+        return execution;
+    }
+
+    public void setExecution(TestcaseExecutionOptionsRequest execution) {
+        this.execution = execution;
     }
 }

@@ -29,6 +29,71 @@
   - 若是一次真实调用或真实执行，必须写清请求、运行参数边界或证据文件路径
   - 若结论会影响设计基线，必须同步更新对应设计文档
 
+## 2026-04-01 10:07:20 +0800
+
+### 主题
+P10 验收 execute 模式代码落地：同路由 execution.enabled/resourceProfile 执行链已具备提交条件
+
+### 参与角色
+- P10 主线程：剩余改动收口、代码验收、提交决策 owner
+
+### 变更背景
+- 上一轮已把 generate-only 基线、execute 模式设计和会议口径收口到文档：
+  - `README.md`
+  - `docs/DESIGN.md`
+  - `docs/TESTCASE_GENERATION_V3_CURRENT.md`
+- 当前工作区剩余未提交内容，主要是 execute 模式的代码实现，而不是 testcase 生成质量治理本身。
+- 本轮需要确认这些代码是否已经形成一条完整、可提交的最小闭环，而不是半截分支。
+
+### 本次决策
+- 统一结论：当前剩余改动属于同一个 execute workstream，可以作为一批提交。
+- 已落地的代码闭环包括：
+  - `TestcaseGenerationController` 在同一路由 `POST /api/testcase/generate` 上接入 `execution.enabled`
+  - `TestcaseGenerateRequest/Response` 新增 `execution` 请求和结构化执行结果响应
+  - `GeneratedTestcaseExecutionServiceImpl` 负责 `provision -> compile -> test -> release` 四阶段执行
+  - `ResourceProfileRegistry` + `TestResourceLifecycleHandler` 负责白名单 `resourceProfile` 收口
+  - `ProcessBackedGeneratedTestcaseArtifactRunner` 负责把生成代码编译并执行
+  - `UnknownResourceProfileException` / controller advice 负责非法 profile 的 `400` 语义
+- 当前实现方向与既有设计文档一致：
+  - generate-only 仍是默认路径
+  - execute 仍走同一路由，不新增第二个公开执行接口
+  - 首版只支持白名单 `execution.resourceProfile`
+
+### 验收方法
+- 定向测试：
+  - `mvn -q -Dtest=TestcaseGenerationControllerTest,TestcaseGenerationControllerAdviceTest,GeneratedTestcaseExecutionServiceImplTest test`
+- 打包：
+  - `mvn -q -DskipTests package`
+- 主线程代码审阅范围：
+  - controller / request-response DTO
+  - execution service / registry / runner
+  - docs 与测试是否对齐同一路由设计
+
+### 验收结果
+- 定向测试通过。
+- 打包通过。
+- 主线程确认本批剩余改动是同一个 execute workstream，不是零散脏文件。
+- 当前批次已经具备单独提交条件。
+
+### 风险/未完成项
+- 本轮验收是“代码测试 + 打包通过”，不是“真实云资源 execute 路径 live 验收通过”。
+- 当前默认 lifecycle handler 仍是 `managed-noop` 风格的本地/占位 profile，真实资源开通与释放 handler 还需后续补齐。
+- `ProcessBackedGeneratedTestcaseArtifactRunner` 当前执行的是仓内简化 JUnit runner，不等于完整生产级测试编排平台。
+
+### 后续动作
+- 将 execute workstream 单独提交，避免继续堆在工作区。
+- 后续若进入真实 execute 验收，优先补真实 `resourceProfile -> provision/release` handler 和运行态记录。
+
+### 关键证据
+- `README.md`
+- `docs/DESIGN.md`
+- `docs/TESTCASE_GENERATION_V3_CURRENT.md`
+- `src/main/java/com/agent/controller/TestcaseGenerationController.java`
+- `src/main/java/com/agent/service/testcase/GeneratedTestcaseExecutionServiceImpl.java`
+- `src/main/java/com/agent/service/testcase/ProcessBackedGeneratedTestcaseArtifactRunner.java`
+- `src/test/java/com/agent/controller/TestcaseGenerationControllerTest.java`
+- `src/test/java/com/agent/service/testcase/GeneratedTestcaseExecutionServiceImplTest.java`
+
 ## 2026-03-30 11:37:54 +0800
 
 ### 主题

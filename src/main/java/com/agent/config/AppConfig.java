@@ -8,6 +8,13 @@ import com.agent.service.KnowledgeBaseService;
 import com.agent.service.KnowledgeBaseServiceImpl;
 import com.agent.service.LLMService;
 import com.agent.service.RerankService;
+import com.agent.service.testcase.GeneratedTestcaseArtifactRunner;
+import com.agent.service.testcase.GeneratedTestcaseExecutionService;
+import com.agent.service.testcase.GeneratedTestcaseExecutionServiceImpl;
+import com.agent.service.testcase.NoopTestResourceLifecycleHandler;
+import com.agent.service.testcase.ProcessBackedGeneratedTestcaseArtifactRunner;
+import com.agent.service.testcase.ResourceProfileRegistry;
+import com.agent.service.testcase.TestResourceLifecycleHandler;
 import com.agent.service.testcase.TestcaseGenerationService;
 import com.agent.service.testcase.TestcaseGenerationServiceImpl;
 import com.agent.service.impl.DisabledLLMService;
@@ -49,6 +56,8 @@ public class AppConfig {
     static final String HOME_ENV = "ASCEND_AGENT_HOME";
     static final String DEFAULT_HOME_DIR = ".ascend_agent";
     static final String DEFAULT_DB_DIR = "db";
+    static final String DEFAULT_GENERATED_TEST_RUNS_DIR = "generated-testcase-runs";
+    static final String DEFAULT_GENERATED_TEST_RUNNER_DIR = "tools/generated-test-runner";
 
     @Bean
     public MetadataStore metadataStore() {
@@ -253,5 +262,39 @@ public class AppConfig {
                 llmService,
                 webDocumentCrawler,
                 topK);
+    }
+
+    @Bean
+    public TestResourceLifecycleHandler noopTestResourceLifecycleHandler() {
+        return new NoopTestResourceLifecycleHandler();
+    }
+
+    @Bean
+    public ResourceProfileRegistry resourceProfileRegistry(List<TestResourceLifecycleHandler> handlers) {
+        return new ResourceProfileRegistry(handlers);
+    }
+
+    @Bean
+    public GeneratedTestcaseArtifactRunner generatedTestcaseArtifactRunner() {
+        Path agentHome = resolveAgentHome(
+                System.getProperty(HOME_PROPERTY),
+                System.getenv(HOME_ENV),
+                System.getProperty("user.dir"));
+        return new ProcessBackedGeneratedTestcaseArtifactRunner(
+                agentHome.resolve(DEFAULT_GENERATED_TEST_RUNNER_DIR).normalize());
+    }
+
+    @Bean
+    public GeneratedTestcaseExecutionService generatedTestcaseExecutionService(
+            ResourceProfileRegistry resourceProfileRegistry,
+            GeneratedTestcaseArtifactRunner generatedTestcaseArtifactRunner) {
+        Path agentHome = resolveAgentHome(
+                System.getProperty(HOME_PROPERTY),
+                System.getenv(HOME_ENV),
+                System.getProperty("user.dir"));
+        return new GeneratedTestcaseExecutionServiceImpl(
+                resourceProfileRegistry,
+                generatedTestcaseArtifactRunner,
+                agentHome.resolve(DEFAULT_GENERATED_TEST_RUNS_DIR).normalize());
     }
 }

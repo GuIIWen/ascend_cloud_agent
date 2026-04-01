@@ -21,15 +21,23 @@
 - 用户确认候选 API
 - 服务端自动写入测试文件
 - 端到端 Agent 主入口闭环
-- 服务侧自动执行生成出来的测试
+- 服务侧 execute 模式虽已完成方案收口，但当前仓库尚未落地，不能按“已实现能力”阅读
 
-## 0. 当前基线/后续治理（截至 2026-03-27）
+## 0. 当前基线/后续治理（截至 2026-03-30）
 
 当前基线：
 - 本文件中的“用户确认候选 API”属于交互式流程描述；而 [ARCHITECTURE.md](/root/ascend_agent/docs/ARCHITECTURE.md) 的目标叙事是“零交互”。两者不应同时被解读为“已实现”，需在实现前先统一产品形态与链路取舍。
 - 当前已收口的运行基线包括：Java 21、Spring Boot 服务默认 `8080`、Chroma 开发态地址 `127.0.0.1:22333`。
 - 当前长期默认目录合同为 `ASCEND_AGENT_HOME=./.ascend_agent/`；若运行时需要强制对齐该合同，应显式传入 `-Dascend.agent.data-dir` 并用 `CHROMA_*` 环境变量覆盖脚本路径。
 - 当前 Agent 运行态应以 `/actuator/info` 为准；在进入统一收编前，预期值是 `agent.stage=alignment`、`agent.enabled=false`、`agent.mode=knowledge-base-only`。
+- 当前 testcase 公开基线是：`POST /api/testcase/generate` 在不带 `execution` 或 `execution.enabled!=true` 时保持 generate-only，只生成代码，不把历史脚本验证经验表述成当前公开执行能力。
+- 已批准的下一步扩展是：仍沿用 `POST /api/testcase/generate`，通过 `execution.enabled=true` 打开 execute 能力，不新增第二个公开执行路由。
+- execute 模式的资源生命周期边界已收口：
+  - 生成代码只负责 API 调用与断言
+  - 资源开通、运行态注入、释放由稳定执行层承接
+  - 首版只支持白名单 `execution.resourceProfile`，不建设通用 orchestrator / resource platform
+- 错误语义收口为：`execution.enabled=true` 但缺失或非法 `execution.resourceProfile` 返回 `400`
+- execute 模式一旦落地，失败时也必须 release，并对外暴露 `provision / compile / test / release` 状态。
 - 文中任何“可运行/可写入文件”的步骤仍主要属于目标设计，不应被解读为当前仓库已完成闭环。
 
 后续治理：
@@ -46,6 +54,7 @@
 - 利用 embedding 模型进行语义检索
 - 使用 rerank 模型精确排序候选 API
 - 调用 LLM 生成高质量测试代码
+- 在同一路由通过 `execution.enabled` 区分 generate-only 与 execute 路径，其中 execute 的资源生命周期由稳定执行层托管
 - 支持自定义模型配置
 
 ## 2. 系统架构
@@ -156,6 +165,53 @@ LLM生成测试代码
 - `RerankService`：候选结果重排序
 - `LLMService`：代码生成
 - `VectorDBService`：向量存储和检索
+
+### 2.3 Execute 模式目标分层（P10 收口）
+
+> 本节描述已获批准的 execute 模式目标分层，用于指导后续实现。它不是“当前代码已具备”的声明。
+
+```mermaid
+flowchart LR
+    A[POST /api/testcase/generate] --> B{execution.enabled}
+    B -->|!= true| C[现有生成链路]
+    B -->|true| D[Stable Execution Layer]
+    D --> E[Resolve whitelisted execution.resourceProfile]
+    E --> F[Provision resources]
+    F --> C
+    C --> G[Compile generated testcase]
+    G --> H[Run testcase]
+    H --> I[Release resources]
+    I --> J[Return provision/compile/test/release status]
+
+    F -. failure .-> I
+    C -. failure .-> I
+    G -. failure .-> I
+    H -. failure .-> I
+```
+
+职责边界：
+- Controller 继续只暴露 `POST /api/testcase/generate`，不新增第二个公开执行路由。
+- Stable Execution Layer 负责：
+  - 校验 `execution.resourceProfile` 是否在白名单内
+  - 自动开通本 profile 所需资源
+  - 把运行时参数注入生成代码
+  - 编译并执行生成出来的测试
+  - 在成功/失败路径都触发 release
+- LLM 生成代码只负责：
+  - 目标 API 调用
+  - 请求构造
+  - 断言
+- 生成代码不负责：
+  - 资源开通
+  - 资源释放
+  - 通用编排
+  - 生命周期治理
+
+设计约束：
+- 首版 execute 模式只支持白名单 `execution.resourceProfile`，不接收用户自定义编排逻辑。
+- 不建设通用 orchestrator，不把 execute 演化成资源编排平台。
+- `execution.enabled=true` 但缺失或非法 `execution.resourceProfile` 必须直接返回 `400`。
+- 响应中必须保留 `provision / compile / test / release` 四段状态，便于定位失败点和追踪 release。
 
 ## 3. 数据流设计
 

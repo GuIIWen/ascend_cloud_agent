@@ -2,12 +2,20 @@ package com.agent.controller;
 
 import com.agent.model.error.ApiErrorResponse;
 import com.agent.model.testcase.TestcaseCitationResponse;
+import com.agent.model.testcase.TestcaseExecutionOptionsRequest;
+import com.agent.model.testcase.TestcaseExecutionResponse;
+import com.agent.model.testcase.TestcaseExecutionStageResponse;
 import com.agent.model.testcase.TestcaseGenerateRequest;
 import com.agent.model.testcase.TestcaseGenerateResponse;
+import com.agent.service.testcase.GeneratedTestcaseExecutionRequest;
+import com.agent.service.testcase.GeneratedTestcaseExecutionResult;
+import com.agent.service.testcase.GeneratedTestcaseExecutionService;
+import com.agent.service.testcase.GeneratedTestcaseStageResult;
 import com.agent.service.testcase.TestcaseCitation;
 import com.agent.service.testcase.TestcaseGenerationRequest;
 import com.agent.service.testcase.TestcaseGenerationResult;
 import com.agent.service.testcase.TestcaseGenerationService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -24,9 +32,18 @@ import java.util.Map;
 public class TestcaseGenerationController {
 
     private final TestcaseGenerationService testcaseGenerationService;
+    private final GeneratedTestcaseExecutionService generatedTestcaseExecutionService;
 
     public TestcaseGenerationController(TestcaseGenerationService testcaseGenerationService) {
+        this(testcaseGenerationService, null);
+    }
+
+    @Autowired
+    public TestcaseGenerationController(
+            TestcaseGenerationService testcaseGenerationService,
+            GeneratedTestcaseExecutionService generatedTestcaseExecutionService) {
         this.testcaseGenerationService = testcaseGenerationService;
+        this.generatedTestcaseExecutionService = generatedTestcaseExecutionService;
     }
 
     @PostMapping(
@@ -44,14 +61,24 @@ public class TestcaseGenerationController {
         Integer expectedHttpStatus = normalizeExpectedHttpStatus(request.getExpectedHttpStatus());
         String expectedErrorCode = normalizeExpectedErrorCode(request.getExpectedErrorCode());
         String expectedErrorDescription = normalizeExpectedErrorDescription(request.getExpectedErrorDescription());
-        TestcaseGenerationResult result = testcaseGenerationService.generate(
-                new TestcaseGenerationRequest(
-                        requirement,
-                        referenceUrl,
-                        expectedHttpStatus,
-                        expectedErrorCode,
-                        expectedErrorDescription));
-        return ResponseEntity.ok(toResponse(result));
+        TestcaseGenerationRequest generationRequest = new TestcaseGenerationRequest(
+                requirement,
+                referenceUrl,
+                expectedHttpStatus,
+                expectedErrorCode,
+                expectedErrorDescription);
+        TestcaseGenerationResult result = testcaseGenerationService.generate(generationRequest);
+        GeneratedTestcaseExecutionResult executionResult = null;
+        if (isExecutionEnabled(request.getExecution())) {
+            if (generatedTestcaseExecutionService == null) {
+                throw new IllegalStateException("Generated testcase execution service is not configured");
+            }
+            executionResult = generatedTestcaseExecutionService.execute(
+                    generationRequest,
+                    result,
+                    new GeneratedTestcaseExecutionRequest(normalizeResourceProfile(request.getExecution())));
+        }
+        return ResponseEntity.ok(toResponse(result, executionResult));
     }
 
     private ApiErrorResponse validateRequest(TestcaseGenerateRequest request) {
@@ -72,6 +99,21 @@ public class TestcaseGenerationController {
         Integer expectedHttpStatus = request.getExpectedHttpStatus();
         if (expectedHttpStatus != null && (expectedHttpStatus < 100 || expectedHttpStatus > 599)) {
             return validationError("expectedHttpStatus", "expectedHttpStatus must be between 100 and 599");
+        }
+        TestcaseExecutionOptionsRequest execution = request.getExecution();
+        if (execution != null) {
+            String resourceProfile = normalizeResourceProfile(execution);
+            if (Boolean.TRUE.equals(execution.getEnabled()) && resourceProfile == null) {
+                return validationError(
+                        "execution.resourceProfile",
+                        "execution.resourceProfile must not be blank when execution.enabled is true");
+            }
+            if (resourceProfile != null) {
+                if (generatedTestcaseExecutionService == null) {
+                    throw new IllegalStateException("Generated testcase execution service is not configured");
+                }
+                generatedTestcaseExecutionService.assertSupportedResourceProfile(resourceProfile);
+            }
         }
         return null;
     }
@@ -110,7 +152,21 @@ public class TestcaseGenerationController {
         return normalized.isEmpty() ? null : normalized;
     }
 
-    private TestcaseGenerateResponse toResponse(TestcaseGenerationResult result) {
+    private String normalizeResourceProfile(TestcaseExecutionOptionsRequest execution) {
+        if (execution == null || execution.getResourceProfile() == null) {
+            return null;
+        }
+        String normalized = execution.getResourceProfile().trim();
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private boolean isExecutionEnabled(TestcaseExecutionOptionsRequest execution) {
+        return execution != null && Boolean.TRUE.equals(execution.getEnabled());
+    }
+
+    private TestcaseGenerateResponse toResponse(
+            TestcaseGenerationResult result,
+            GeneratedTestcaseExecutionResult executionResult) {
         if (result == null) {
             throw new IllegalStateException("Testcase generation result must not be null");
         }
@@ -118,7 +174,35 @@ public class TestcaseGenerationController {
                 result.getJavaTestCode(),
                 toCitationResponses(result.getCitations()),
                 result.isDegraded(),
-                result.getRefinedRequirement());
+                result.getRefinedRequirement(),
+                toExecutionResponse(executionResult));
+    }
+
+    private TestcaseExecutionResponse toExecutionResponse(GeneratedTestcaseExecutionResult executionResult) {
+        if (executionResult == null) {
+            return null;
+        }
+        return new TestcaseExecutionResponse(
+                executionResult.getResourceProfile(),
+                executionResult.getStatus(),
+                executionResult.getRunId(),
+                executionResult.getRunDirectory(),
+                toExecutionStageResponse(executionResult.getProvision()),
+                toExecutionStageResponse(executionResult.getCompile()),
+                toExecutionStageResponse(executionResult.getTest()),
+                toExecutionStageResponse(executionResult.getRelease()));
+    }
+
+    private TestcaseExecutionStageResponse toExecutionStageResponse(GeneratedTestcaseStageResult stageResult) {
+        if (stageResult == null) {
+            return null;
+        }
+        return new TestcaseExecutionStageResponse(
+                stageResult.getStatus(),
+                stageResult.getMessage(),
+                stageResult.getStartedAt(),
+                stageResult.getFinishedAt(),
+                stageResult.getDetails());
     }
 
     private List<TestcaseCitationResponse> toCitationResponses(List<TestcaseCitation> citations) {

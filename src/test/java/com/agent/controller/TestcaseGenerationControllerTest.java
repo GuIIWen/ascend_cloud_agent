@@ -2,18 +2,27 @@ package com.agent.controller;
 
 import com.agent.model.error.ApiErrorResponse;
 import com.agent.model.testcase.TestcaseCitationResponse;
+import com.agent.model.testcase.TestcaseExecutionOptionsRequest;
+import com.agent.model.testcase.TestcaseExecutionResponse;
 import com.agent.model.testcase.TestcaseGenerateRequest;
 import com.agent.model.testcase.TestcaseGenerateResponse;
+import com.agent.service.testcase.GeneratedTestcaseExecutionRequest;
+import com.agent.service.testcase.GeneratedTestcaseExecutionResult;
+import com.agent.service.testcase.GeneratedTestcaseExecutionService;
+import com.agent.service.testcase.GeneratedTestcaseStageResult;
 import com.agent.service.testcase.TestcaseCitation;
 import com.agent.service.testcase.TestcaseGenerationRequest;
 import com.agent.service.testcase.TestcaseGenerationResult;
 import com.agent.service.testcase.TestcaseGenerationService;
 import com.agent.service.testcase.TestcaseReferenceUrlRequiredException;
+import com.agent.service.testcase.UnknownResourceProfileException;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -123,6 +132,57 @@ class TestcaseGenerationControllerTest {
     }
 
     @Test
+    void generateWithExecutionReturnsStructuredExecutionResult() {
+        SuccessService service = new SuccessService();
+        SuccessExecutionService executionService = new SuccessExecutionService();
+        TestcaseGenerationController controller = new TestcaseGenerationController(service, executionService);
+        TestcaseGenerateRequest request = new TestcaseGenerateRequest();
+        request.setRequirement("验证创建实例成功");
+        TestcaseExecutionOptionsRequest execution = new TestcaseExecutionOptionsRequest();
+        execution.setEnabled(true);
+        execution.setResourceProfile("managed-noop");
+        request.setExecution(execution);
+
+        ResponseEntity<?> response = controller.generate(request);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        TestcaseGenerateResponse body = assertInstanceOf(TestcaseGenerateResponse.class, response.getBody());
+        TestcaseExecutionResponse executionBody = body.getExecution();
+        assertEquals("managed-noop", executionBody.getResourceProfile());
+        assertEquals("SUCCEEDED", executionBody.getStatus());
+        assertEquals("SUCCEEDED", executionBody.getProvision().getStatus());
+        assertEquals("SUCCEEDED", executionBody.getCompile().getStatus());
+        assertEquals("SUCCEEDED", executionBody.getTest().getStatus());
+        assertEquals("SUCCEEDED", executionBody.getRelease().getStatus());
+        assertEquals("managed-noop", executionService.capturedResourceProfile);
+        assertEquals("验证创建实例成功", executionService.capturedRequirement);
+    }
+
+    @Test
+    void generateRejectsUnknownResourceProfileBeforeGeneration() {
+        GuardService service = new GuardService();
+        RejectingExecutionService executionService = new RejectingExecutionService();
+        TestcaseGenerationController controller = new TestcaseGenerationController(service, executionService);
+        TestcaseGenerationControllerAdvice advice = new TestcaseGenerationControllerAdvice();
+        TestcaseGenerateRequest request = new TestcaseGenerateRequest();
+        request.setRequirement("验证创建实例成功");
+        TestcaseExecutionOptionsRequest execution = new TestcaseExecutionOptionsRequest();
+        execution.setEnabled(true);
+        execution.setResourceProfile("unknown-profile");
+        request.setExecution(execution);
+
+        UnknownResourceProfileException thrown =
+                assertThrows(UnknownResourceProfileException.class, () -> controller.generate(request));
+
+        ResponseEntity<ApiErrorResponse> response = advice.handleUnknownResourceProfile(thrown);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(UnknownResourceProfileException.ERROR_CODE, response.getBody().getError().getCode());
+        assertFalse(service.called);
+        assertEquals("unknown-profile", executionService.capturedResourceProfile);
+    }
+
+    @Test
     void generatePropagatesKbMissWithoutReferenceUrlError() {
         NoHitWithoutUrlService service = new NoHitWithoutUrlService();
         TestcaseGenerationController controller = new TestcaseGenerationController(service);
@@ -185,6 +245,73 @@ class TestcaseGenerationControllerTest {
         public TestcaseGenerationResult generate(TestcaseGenerationRequest request) {
             this.capturedReferenceUrl = request.getReferenceUrl();
             throw new TestcaseReferenceUrlRequiredException();
+        }
+    }
+
+    private static final class SuccessExecutionService implements GeneratedTestcaseExecutionService {
+        private String capturedResourceProfile;
+        private String capturedRequirement;
+
+        @Override
+        public void assertSupportedResourceProfile(String resourceProfile) {
+            this.capturedResourceProfile = resourceProfile;
+        }
+
+        @Override
+        public Set<String> supportedResourceProfiles() {
+            return Set.of("managed-noop");
+        }
+
+        @Override
+        public GeneratedTestcaseExecutionResult execute(
+                TestcaseGenerationRequest generationRequest,
+                TestcaseGenerationResult generationResult,
+                GeneratedTestcaseExecutionRequest executionRequest) {
+            this.capturedRequirement = generationRequest.getRequirement();
+            this.capturedResourceProfile = executionRequest.getResourceProfile();
+            return new GeneratedTestcaseExecutionResult(
+                    executionRequest.getResourceProfile(),
+                    "SUCCEEDED",
+                    "run-1",
+                    "/tmp/run-1",
+                    successStage("provision"),
+                    successStage("compile"),
+                    successStage("test"),
+                    successStage("release"));
+        }
+
+        private GeneratedTestcaseStageResult successStage(String phase) {
+            LinkedHashMap<String, Object> details = new LinkedHashMap<>();
+            details.put("phase", phase);
+            return new GeneratedTestcaseStageResult(
+                    GeneratedTestcaseStageResult.STATUS_SUCCEEDED,
+                    phase + " ok",
+                    "2026-03-30T00:00:00Z",
+                    "2026-03-30T00:00:00Z",
+                    details);
+        }
+    }
+
+    private static final class RejectingExecutionService implements GeneratedTestcaseExecutionService {
+        private String capturedResourceProfile;
+
+        @Override
+        public void assertSupportedResourceProfile(String resourceProfile) {
+            this.capturedResourceProfile = resourceProfile;
+            throw new UnknownResourceProfileException(resourceProfile, Set.of("managed-noop"));
+        }
+
+        @Override
+        public Set<String> supportedResourceProfiles() {
+            return Set.of("managed-noop");
+        }
+
+        @Override
+        public GeneratedTestcaseExecutionResult execute(
+                TestcaseGenerationRequest generationRequest,
+                TestcaseGenerationResult generationResult,
+                GeneratedTestcaseExecutionRequest executionRequest) {
+            throw new AssertionError("execute should not be called for unknown resource profile");
         }
     }
 }

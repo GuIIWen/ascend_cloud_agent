@@ -1,43 +1,66 @@
 # Testcase Generation Batch 3 (Current Version Design, V3)
 
-Status: **Execution design** (current version, implementable constraints)
+Status: **Execution baseline + approved execute-mode extension**
 
-This document is the *current* Batch 3 design baseline for: **testcase requirement (+ optional referenceUrl) -> Java testcase code**.
-It is intentionally constrained and must not drift into "收编" (planner/workflow/orchestrator or auto-execution).
+This document is the current Batch 3 contract for `POST /api/testcase/generate`.
+Current truth today: the shipped baseline is still **generate-only**. This revision also records the approved execute extension on the **same endpoint**. The trigger contract is `execution.enabled=true` together with `execution.resourceProfile`; do not keep a parallel flat trigger reading.
 
 Current rule authority:
-- This document is the execution baseline for Batch 3.
+- This document is the Batch 3 execution baseline and approved incremental design.
 - Product hard decisions are recorded in `meeting.md` (latest Batch 3 entries).
 - `docs/DESIGN.md` and `docs/ARCHITECTURE.md` remain target-state documents; they must not override this file for current implementation truth.
 
-## 1. Background And Goal
+## 1. Scope And Baseline
 
-Batch 3 goal:
+Batch 3 currently supports:
 - Input: a natural language testcase requirement (free text).
 - Optional input: a `referenceUrl` (a web page that contains relevant API docs).
-- Output: **Java testcase code** (a single-file Java test class as a string).
+- Output in default mode: **Java testcase code** (a single-file Java test class as a string).
 
-Key rules:
-- KB hit: do **RAG** then use **custom LLM from configuration** to generate Java test code.
-- KB miss + `referenceUrl` present: fetch/crawl the URL, extract temporary context, then use the **same custom LLM** to generate code.
+This round adds the approved execute-mode contract:
+- Public endpoint remains `POST /api/testcase/generate`.
+- If `execution` is absent, or `execution.enabled` is not `true`, the request remains on the existing generate-only path.
+- Execute capability is enabled on the same route through nested `execution.enabled=true`.
+- In `execute` mode, resource lifecycle is owned by a service-side stable execution layer, not by LLM-generated code.
+
+Key generation rules:
+- KB hit: do **RAG** then use the configured custom LLM to generate Java test code.
+- KB miss + `referenceUrl` present: fetch/crawl the URL, extract temporary context, then use the same custom LLM to generate code.
 - KB miss + `referenceUrl` absent: return error, **do not generate code**.
 
-## 2. Non-Goals (Hard)
+## 2. Hard Boundaries
 
-- No planner/workflow/orchestrator and no multi-step execution framework.
-- No auto-running tests.
-- No service-side automatic execution against Huawei Cloud during `POST /api/testcase/generate`.
+- No second public execute route besides `POST /api/testcase/generate`.
+- No planner/workflow/orchestrator and no generic multi-step execution framework.
+- No generic resource orchestration platform.
+- No user-defined free-form resource graph or arbitrary provisioning script.
 - No writing files to the repo (no `src/test/java/**` writes from the service).
 - No PR creation.
 - No new storage or middleware as a prerequisite.
-- No new external API routes besides `POST /api/testcase/generate`.
+- `execute` first version supports only a server-side whitelist of `execution.resourceProfile`.
+- LLM-generated testcase code is limited to API invocation, request construction, and assertions.
+- Resource provision/release, runtime wiring, and cleanup belong to the stable execution layer.
 
-## 3. User Entry And API Contract
+## 3. Public API Contract
 
-Endpoint:
+Shared endpoint:
 - `POST /api/testcase/generate`
 
-Request JSON:
+Shared request fields:
+- `requirement`
+- `referenceUrl` (optional)
+- `expectedHttpStatus` (optional)
+- `expectedErrorCode` (optional)
+- `expectedErrorDescription` (optional)
+- `execution` (optional object)
+
+Execute-only request field:
+- `execution.enabled`: must be `true` to enter execute path
+- `execution.resourceProfile`: required when `execution.enabled=true`; must be a service-side whitelist ID
+
+### 3.1 Generate Request / Response
+
+Generate request example:
 ```json
 {
   "requirement": "Validate delete workflow returns 400 for invalid workflow_id",
@@ -48,11 +71,12 @@ Request JSON:
 }
 ```
 
-Response JSON (HTTP 200):
+Generate response example:
 ```json
 {
   "javaTestCode": "/* full Java test code */",
   "degraded": false,
+  "refinedRequirement": "前置条件：...\n输入：...\n步骤：...\n断言：...",
   "citations": [
     {
       "type": "knowledge-base",
@@ -67,78 +91,126 @@ Response JSON (HTTP 200):
 }
 ```
 
+### 3.2 Execute Request / Response
+
+Execute request example:
+```json
+{
+  "requirement": "验证卸载 Lite Server 系统盘在 BMS 场景下返回 400",
+  "expectedHttpStatus": 400,
+  "expectedErrorCode": "ModelArts.7000",
+  "expectedErrorDescription": "does not support detach volume device",
+  "execution": {
+    "enabled": true,
+    "resourceProfile": "liteServerDetachVolumeNegativeV1"
+  }
+}
+```
+
+Execute response example:
+```json
+{
+  "javaTestCode": "/* full Java test code */",
+  "degraded": false,
+  "refinedRequirement": "前置条件：...\n输入：...\n步骤：...\n断言：...",
+  "citations": [
+    {
+      "type": "knowledge-base",
+      "apiId": "huawei-modelarts-detachDevServerVolume",
+      "source": "https://support.huaweicloud.com/api-modelarts/DetachDevServerVolume.html"
+    }
+  ],
+  "execution": {
+    "enabled": true,
+    "resourceProfile": "liteServerDetachVolumeNegativeV1",
+    "overallStatus": "FAILED",
+    "stages": {
+      "provision": "SUCCEEDED",
+      "compile": "SUCCEEDED",
+      "test": "FAILED",
+      "release": "SUCCEEDED"
+    }
+  }
+}
+```
+
 Notes:
-- `citations` is required for traceability (KB RAG sources and/or referenceUrl).
-- "KB hit" is defined as: at least one retrieved item can be resolved to a concrete API metadata record (e.g. `apiId` exists and metadata lookup succeeds). A vector store returning text segments alone is not a KB hit.
-- `degraded` semantics:
-  - `false`: generation used normal KB hit RAG context as primary source.
-  - `true`: generation succeeded but used fallback/partial context (for example KB miss + referenceUrl temporary context).
-- Optional expectation fields are part of the current request contract:
-  - `expectedHttpStatus`
-  - `expectedErrorCode`
-  - `expectedErrorDescription`
-- Real validated truth for the negative case `DELETE /v2/{project_id}/workflows/invalid-id-format` is:
-  - HTTP `400`
-  - `error_code=ModelArts.0104`
-  - `error_msg=Invalid parameter, error: Key: '' Error:Field validation for '' failed on the 'uuid4' tag.`
+- `citations` is required for traceability (KB RAG sources and/or `referenceUrl`).
+- "KB hit" means at least one retrieved item can be resolved to a concrete API metadata record (for example `apiId` exists and metadata lookup succeeds). A vector store returning text segments alone is not a KB hit.
+- `degraded=false` means generation used normal KB hit RAG context as primary source.
+- `degraded=true` means generation succeeded but used fallback or partial context (for example KB miss + temporary `referenceUrl` context).
+- The `execution.resourceProfile` value above is illustrative. Actual supported profiles are controlled by a service-side whitelist.
+- `execution.stages` must always expose `provision`, `compile`, `test`, and `release`.
 
-## 4. Generation Chain (Single Request, No Orchestration)
+## 4. Generate Mode Chain
 
-All LLM calls must use the **custom LLM** configured via `knowledge-base.llm.*`.
+All LLM calls must use the custom LLM configured via `knowledge-base.llm.*`.
 
-1. Requirement refinement (LLM call #1)
-   - Input: `requirement` (+ optional short summary from `referenceUrl` if the URL is provided and fetch succeeds).
-   - Output: a structured, generation-friendly testcase description (stable schema, strict format).
+1. Requirement refinement
+   - Input: `requirement` (+ optional short summary from `referenceUrl` if fetch succeeds).
+   - Output: a structured, generation-friendly testcase description.
    - Purpose: make retrieval query stable and make code generation deterministic.
-
-2. Context acquisition (retrieval)
+2. Context acquisition
    - Query KB using the refined description.
-   - If KB hit:
-     - Build RAG context from top matches (API metadata + source links).
-   - If KB miss and `referenceUrl` is present:
-     - Fetch/crawl and extract content from `referenceUrl` as **temporary** context for this request.
-     - Do not persist it as a new prerequisite (no new storage).
-   - If KB miss and `referenceUrl` is absent:
-     - Return the hard error `TESTCASE_REFERENCE_URL_REQUIRED` (no generation).
-
-3. Java testcase code generation (LLM call #2)
-   - Input: refined testcase description + context (KB RAG context or referenceUrl extracted content).
+   - If KB hit: build RAG context from top matches (API metadata + source links).
+   - If KB miss and `referenceUrl` is present: fetch/crawl and extract temporary context for this request only.
+   - If KB miss and `referenceUrl` is absent: return `TESTCASE_REFERENCE_URL_REQUIRED`.
+3. Java testcase code generation
+   - Input: refined testcase description + context (KB RAG context or extracted `referenceUrl` content).
    - Output: a compilable Java testcase class (JUnit 5 baseline).
    - Guardrails:
-     - Do not output placeholders like `TODO` or "skeleton only" when context is insufficient.
-     - If neither KB context nor referenceUrl context exists, must error (Step 2 rule).
+     - Do not output placeholders like `TODO` or "skeleton only".
+     - If neither KB context nor `referenceUrl` context exists, must error.
 
-## 4.1 Post-Generation Verification Chain (Repository Validation Path)
+## 5. Execute Mode Chain
 
-The service returns `javaTestCode`; repository-side scripts validate or execute that code. This verification chain is part of the current delivery baseline, but it is **not** a public service-side execution feature.
+`execution.enabled=true` reuses the same refinement, retrieval, and code-generation pipeline, then adds a stable service-side execution layer.
 
 ```mermaid
 flowchart LR
-    A[User requirement] --> B[POST /api/testcase/generate]
-    B --> C[refinedRequirement + citations + javaTestCode]
-    C --> D[GeneratedTestcasePostProcessor]
-    D --> E[Compile Verification]
-    E --> F{Optional execute}
-    F -->|No| G[Compile-only acceptance]
-    F -->|Yes| H[GeneratedJUnitRunner]
-    H --> I[Huawei Cloud API]
-    I --> J[Pass / Fail evidence]
+    A[User request execution.enabled=true] --> B[POST /api/testcase/generate]
+    B --> C[Stable Execution Layer]
+    C --> D[Resolve whitelisted execution.resourceProfile]
+    D --> E[Provision resources]
+    E --> F[Existing generate chain]
+    F --> G[Compile generated testcase]
+    G --> H[Run generated testcase]
+    H --> I[Release resources]
+    I --> J[Response with provision/compile/test/release states]
+
+    E -. failure .-> I
+    F -. failure .-> I
+    G -. failure .-> I
+    H -. failure .-> I
 ```
 
-Current repository entrypoints:
-- Compile-only verifier:
-  - `bash scripts/verify_testcase_generation.sh ...`
-- Runner preparation:
-  - `bash scripts/install_generated_test_runner.sh`
-- Generate + compile + optional real execute:
-  - `bash scripts/run_generated_testcase.sh ...`
+### 5.1 Stable Execution Layer Responsibility
 
-Rules:
-- Compile-only is the default verification path and should be used as the fast gate.
-- Real execute is an optional validation path for curated scenarios with explicit runtime config.
-- Real execute validates generated code quality and environment truth; it is not part of the service request itself.
+- Resolve `execution.resourceProfile` to a fixed, audited server-side routine.
+- Auto-provision only the resources required by that profile.
+- Feed resolved runtime values into the generated testcase at execution time.
+- Reuse the same generated `javaTestCode`; do not hand-rewrite assertions in execute mode.
+- Compile and run the generated testcase in a temporary execution workspace.
+- Always trigger release on the way out, including failure paths.
 
-## 4.2 Generated Code Contract
+### 5.2 Resource Profile Model
+
+- First version supports only whitelisted `execution.resourceProfile`.
+- Each profile binds:
+  - a fixed provision routine
+  - fixed runtime key mapping into generated testcase config
+  - a fixed release routine
+- User input cannot provide arbitrary provisioning logic, cleanup steps, or execution DAGs.
+- This is not a generic resource orchestration platform.
+
+### 5.3 Execution Status Contract
+
+- `provision`, `compile`, `test`, and `release` are mandatory visible stages.
+- Stage status should be represented with stable values such as `NOT_STARTED`, `RUNNING`, `SUCCEEDED`, `FAILED`, or `SKIPPED`.
+- `release` must be attempted even when `provision`, `compile`, or `test` fails.
+- If the response can still be produced, stage failure must be returned as structured execution result rather than collapsed into an opaque error.
+
+## 6. Generated Code Contract
 
 The generated `javaTestCode` is not free-form text. It must follow these hard rules:
 
@@ -155,22 +227,25 @@ The generated `javaTestCode` is not free-form text. It must follow these hard ru
   - `HUAWEICLOUD_VOLUME_ID` / `hwcloud.volume.id`
   - `HUAWEICLOUD_DISK_ID` / `hwcloud.disk.id`
 - Generated code may only call the API that is supported by the selected citation/context. It must not silently introduce an extra API that is not present in the citation set.
+- Generated code is responsible only for the target API call and assertions. It must not create resources, release resources, poll lifecycle transitions, or embed cleanup flows.
 - If explicit truth is not supplied through `expectedHttpStatus`, `expectedErrorCode`, or `expectedErrorDescription`, and the retrieved context also does not provide a concrete truth, the generated code must not fabricate exact status codes, error codes, error descriptions, state transitions, or field values.
 - Generated code must not contain `TODO`, placeholder tokens, or fake sample IDs such as `lite-123`, `system`, `replace_with_xxx`, or similar fabricated literals for required resource IDs.
 
-## 5. Error Semantics
+## 7. Error And Status Semantics
 
 Transport/framework errors:
 - Invalid JSON/body types: `400/415` with structured JSON error payload.
 
-Domain errors (hard rules):
+Domain errors:
 - KB miss + no `referenceUrl`: HTTP `400` with:
   - `error.code=TESTCASE_REFERENCE_URL_REQUIRED`
   - `error.message` must instruct the user to provide `referenceUrl`
   - Response must not contain `javaTestCode`
   - Response must not contain `degraded`
+- `execution.enabled=true` without `execution.resourceProfile`: HTTP `400`
+- `execution.enabled=true` with unsupported `execution.resourceProfile`: HTTP `400`
 
-Suggested error payload shape:
+Suggested hard-error payload shape:
 ```json
 {
   "error": {
@@ -181,27 +256,29 @@ Suggested error payload shape:
 }
 ```
 
-Degrade rules (allowed, but must remain safe):
-- Reference URL fetch failure: may fall back to KB-only generation *only if* KB hit exists; otherwise it must still error (no code).
+Degrade and execution rules:
+- `referenceUrl` fetch failure may fall back to KB-only generation only if KB hit exists; otherwise it must still error.
 - KB retrieval failure should fail closed: do not generate code without a valid context source.
-- Code generation should also fail closed on semantics: if the system cannot derive a truthful status/error assertion from explicit expectations or context, it must prefer a weaker assertion or fail the request rather than invent a false truth.
+- Code generation should fail closed on semantics: if the system cannot derive a truthful assertion, it must prefer a weaker assertion or fail the request rather than invent a false truth.
+- If `execution` is absent, or `execution.enabled` is not `true`, the service must stay on generate-only semantics.
+- In execute mode, accepted requests must preserve `provision / compile / test / release` stage visibility even when one stage fails.
 
-## 6. Configuration Dependencies (Custom LLM)
+## 8. Configuration Dependencies And Runtime Inputs
 
-Both "requirement refinement" and "code generation" must call the same configurable custom LLM channel:
+Both requirement refinement and code generation must call the same configurable custom LLM channel:
 - `knowledge-base.llm.provider=custom`
 - `knowledge-base.llm.api-url`
 - `knowledge-base.llm.api-key`
 - `knowledge-base.llm.model`
 - Optional: `knowledge-base.llm.temperature`, `knowledge-base.llm.max-tokens`, `knowledge-base.llm.timeout-seconds`
 
-Retrieval dependencies (existing KB stack):
+Retrieval dependencies:
 - `knowledge-base.embedding.*`
 - `knowledge-base.vector-store.*`
 
-Batch 3 must not introduce a new config tree unless explicitly approved by P10.
+Batch 3 must not introduce a new public orchestration config tree unless explicitly approved by P10. Execute mode may keep an internal whitelist registry for `execution.resourceProfile`, but not user-defined orchestration logic.
 
-Current runtime truth for the Lite Server BMS detach-volume negative case:
+Current validated truth for the Lite Server BMS detach-volume negative case:
 - Real API:
   - `DELETE /v1/{project_id}/dev-servers/{id}/detachvolume/{volume_id}`
 - Real request target:
@@ -213,71 +290,66 @@ Current runtime truth for the Lite Server BMS detach-volume negative case:
   - `error_code=ModelArts.7000`
   - `error_msg=Server f13a67fc-11c4-48f9-8f0f-b533a5bcea13 type is BMS, does not support detach volume device.`
 
-## 6.1 Real Execution Validation Contract
-
-Real execution is allowed only as a repository-side verification path. It requires explicit runtime inputs and must remain opt-in.
-
-Required runtime config for the current Huawei Cloud negative case:
+Repository-side historical validation inputs for this case:
 - `HUAWEICLOUD_BASE_URL`
 - `HUAWEICLOUD_AUTH_TOKEN`
 - `HUAWEICLOUD_PROJECT_ID`
 - `HUAWEICLOUD_DEV_SERVER_ID`
 - `HUAWEICLOUD_VOLUME_ID`
 
-Execution boundaries:
-- The service does not store or manage cloud credentials for the user.
-- Execute mode must use the same generated `javaTestCode` returned by `/api/testcase/generate`; it must not rewrite the business assertions by hand.
-- Execute mode is used to verify “generated code can really run”, not to replace the service with a workflow engine.
+## 9. Acceptance Criteria
 
-## 7. Acceptance Criteria (Batch 3)
-
+- Missing `execution`, or `execution.enabled!=true`, must behave the same as current generate-only baseline.
 - `POST /api/testcase/generate` returns Java testcase code when:
-  - KB hit exists, regardless of `referenceUrl`.
-  - KB miss but `referenceUrl` is provided and fetch succeeds (uses temporary context).
-- Success response must include all three fields: `javaTestCode`, `citations`, `degraded`.
+  - KB hit exists, regardless of `referenceUrl`
+  - KB miss but `referenceUrl` is provided and fetch succeeds
+- Success response in generate mode must include `javaTestCode`, `citations`, `degraded`, and `refinedRequirement`.
 - `degraded=false` when KB hit context drives generation.
-- `degraded=true` when generation is completed via fallback/partial context path.
-- The endpoint returns an error and generates **no code** when:
-  - KB miss and `referenceUrl` is absent.
-- All generation steps use the configured custom LLM (no hardcoded vendor/model in code path).
+- `degraded=true` when generation is completed via fallback or partial context path.
+- The endpoint returns an error and generates no code when KB miss and `referenceUrl` is absent.
+- All generation steps use the configured custom LLM.
 - No new external API routes besides `/api/testcase/generate`.
-- No new storage/middleware introduced.
-- No workflow/planner/executor/orchestrator path introduced.
-- Response includes `citations` for provenance.
+- No workflow/planner/executor/orchestrator platform is introduced.
+- Execute mode uses only whitelisted `execution.resourceProfile`.
+- Resource lifecycle is owned by the stable execution layer, not by generated code.
+- Execute mode must expose `provision / compile / test / release` stage states and attempt release on failure.
 - Generated code contains exactly one `public class`.
 - Generated code compiles with Java 21 and JUnit 5 dependencies.
 - Generated code does not contain `TODO` or placeholder tokens.
 - Generated code does not hardcode required resource IDs such as dev-server ID, instance ID, volume ID, or disk ID.
 - Generated code uses only the cited API context and does not silently add extra API calls.
-- When explicit truth is absent, generated code does not fabricate exact status/error assertions.
-- Repository verification entrypoints remain aligned with this contract:
-  - `scripts/verify_testcase_generation.sh`
-  - `scripts/install_generated_test_runner.sh`
-  - `scripts/run_generated_testcase.sh`
+- When explicit truth is absent, generated code does not fabricate exact status or error assertions.
 
-## 8. Implemented vs Not Implemented (Current Batch 3 Truth)
+## 10. Current Implementation Status
 
-Implemented:
-- `POST /api/testcase/generate`
+Implemented today:
+- `POST /api/testcase/generate` generate-only baseline
 - Requirement refinement -> retrieval -> code generation main path
-- Knowledge-base hit path and referenceUrl fallback path
+- Knowledge-base hit path and `referenceUrl` fallback path
 - Generated code post-processing and compile-oriented contract checks
-- Compile-only verification script
-- Optional real execution validation script
+- Repository compile-only verification script
+- Repository local compile-and-run validation script using user-supplied runtime config
 
-Not implemented:
-- Any service-side auto execution after generation
+Approved for this round but not yet implemented in current code:
+- `execution.enabled=true` on the same `/api/testcase/generate` route
+- Service-side stable execution layer for auto provision -> compile/run -> release
+- Whitelisted `execution.resourceProfile` registry
+- Structured `provision / compile / test / release` execution status response
+
+Not implemented / explicitly excluded:
+- Any second public execute route
+- Generic resource orchestration platform
 - Planner/workflow/orchestrator style task decomposition
+- Generated code owning resource lifecycle
 - Service-side file writing into repository test sources
 - Frontend product UI
-- Productionized multi-scenario batch validation framework
 
-## 9. Relationship With Historical Docs
+## 11. Relationship With Historical Docs
 
-The following docs are **goal design / larger scope** and must not be treated as Batch 3 execution baseline:
+The following docs are goal-design or larger-scope documents and must not be treated as the Batch 3 execution baseline:
 - `docs/DESIGN.md`
 - `docs/API_TEST_GENERATOR.md`
 - `docs/USE_CASE_OPTIMIZER.md`
 
 Batch 3 execution hard rules:
-- This file + `meeting.md` latest Batch 3 decisions are the current baseline.
+- This file + latest Batch 3 entries in `meeting.md` are the current baseline.

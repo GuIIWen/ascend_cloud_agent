@@ -1,6 +1,6 @@
 # ascend_agent
 
-`ascend_agent` is a Spring Boot service for API knowledge indexing and retrieval. The current baseline focuses on a reproducible local developer workflow: compile and run on Java 21, and use a locally managed Chroma `0.5.20` instance for vector persistence.
+`ascend_agent` is a Spring Boot service for API knowledge indexing/retrieval and testcase generation. The current baseline focuses on a reproducible local developer workflow: compile and run on Java 21, and use a locally managed Chroma `0.5.20` instance for vector persistence.
 
 ## Baseline
 
@@ -162,11 +162,32 @@ timeout 180 mvn -q -DskipTests package
 
 The script forces `JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64` so it does not inherit a stale Java 8 shell environment.
 
-## Generated Testcase Verification
+## Testcase Generation API Baseline
 
-There are now two supported validation paths for generated Java testcases.
+Public testcase endpoint:
 
-### 1. Generate and compile only
+- `POST /api/testcase/generate`
+
+Current baseline today:
+
+- If `execution` is absent, or `execution.enabled` is not `true`, the request stays on the existing generate-only path.
+- Generate mode only returns generation artifacts such as `javaTestCode`, `citations`, `refinedRequirement`, and `degraded`.
+- Repository helper scripts are local validation tooling around the generated code. They are not a second public route, and they do not mean the service already owns cloud resource lifecycle.
+
+Approved next-step design:
+
+- The same endpoint adds execute capability through a nested `execution` object; there is no separate public `/api/testcase/execute` route.
+- `execution.enabled=true` requires a whitelisted `execution.resourceProfile`.
+- Resource provision/release belongs to a stable service-side execution layer, not to the LLM-generated Java code.
+- Generated Java code remains limited to API invocation and assertions.
+- `execution.enabled=true` with missing or invalid `execution.resourceProfile` must return `400`.
+- Execute responses must expose `provision`, `compile`, `test`, and `release` stage states, and `release` must still run on failure.
+
+## Repository Verification Scripts
+
+The repository keeps two local verification paths for generated Java testcases. They are implementation and acceptance helpers around `/api/testcase/generate`; they are not the public service-side execute contract.
+
+### 1. Generate and compile only locally
 
 Use the existing compile-only verifier when you want a fast gate for `/api/testcase/generate` output shape and Java 21 compilation:
 
@@ -186,7 +207,7 @@ This path verifies:
 - Java 21 + JUnit 5 compilation
 - explicit expectation fragments when they are provided
 
-### 2. Generate, compile, and optionally execute the generated testcase
+### 2. Generate, compile, and optionally execute locally
 
 Prepare the shared JUnit runner once:
 
@@ -226,6 +247,7 @@ Notes:
 - `scripts/run_generated_testcase.sh` stores artifacts under `ASCEND_AGENT_HOME/generated-testcase-runs/`.
 - The script prepares the shared `GeneratedJUnitRunner` automatically through `scripts/install_generated_test_runner.sh`.
 - Execute mode uses the current shell environment or system properties consumed by the generated testcase itself; the script does not inject cloud credentials on its own.
+- This local script is repository-side validation tooling. It does not replace the future service-side `execution.enabled=true` contract.
 - The default API endpoint is `http://127.0.0.1:8080/api/testcase/generate`; override it with `--api` if your service is exposed elsewhere.
 
 ## CI
@@ -248,6 +270,8 @@ CI intentionally does not provision Chroma or boot the full application. It is a
 - Chroma is not provisioned inside CI. Local persistence validation still requires a running Chroma instance.
 - Local runtime should use Chroma `0.5.20` on `22333`. Do not mix this README baseline with ad hoc `1.5.x` commands.
 - The repository does not currently provide a single command that provisions Chroma and the Spring Boot service together. Use the documented Chroma scripts plus [scripts/start_service.sh](/root/ascend_agent/scripts/start_service.sh).
+- The current public testcase API baseline is still generate-only unless `execution.enabled=true`. Approved execute capability is same-route design work, not a historical already-shipped capability.
+- Existing generated-testcase scripts are local verification helpers; automatic resource provision/release belongs to the future stable execution layer, not to generated code or shell scripts.
 - The project contains additional local-only files and environment-specific workflows not covered by this README.
 - For local service startup, pass the vector store URL and data directory explicitly if your local config still points somewhere else.
 - Service startup disables Boot's logging shutdown hook in the wrapper script to reduce shutdown-time logging races in packaged runs.
@@ -260,7 +284,7 @@ CI intentionally does not provision Chroma or boot the full application. It is a
 - Service stop script: [scripts/stop_service.sh](/root/ascend_agent/scripts/stop_service.sh)
 - Baseline verification script: [scripts/verify_baseline.sh](/root/ascend_agent/scripts/verify_baseline.sh)
 - Generated testcase runner install script: [scripts/install_generated_test_runner.sh](/root/ascend_agent/scripts/install_generated_test_runner.sh)
-- Generated testcase compile/execute script: [scripts/run_generated_testcase.sh](/root/ascend_agent/scripts/run_generated_testcase.sh)
+- Generated testcase local compile/execute script: [scripts/run_generated_testcase.sh](/root/ascend_agent/scripts/run_generated_testcase.sh)
 - Generated testcase compile-only verifier: [scripts/verify_testcase_generation.sh](/root/ascend_agent/scripts/verify_testcase_generation.sh)
 - CI workflow: [.github/workflows/ci.yml](/root/ascend_agent/.github/workflows/ci.yml)
 - Batch 3 testcase generation execution baseline: [docs/TESTCASE_GENERATION_V3_CURRENT.md](/root/ascend_agent/docs/TESTCASE_GENERATION_V3_CURRENT.md) + latest Batch 3 decisions in `meeting.md`
